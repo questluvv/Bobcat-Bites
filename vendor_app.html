@@ -48,6 +48,15 @@
   .code { font-weight:800; letter-spacing:3px; color:var(--gold); background:var(--navy); border-radius:8px; padding:2px 10px; }
   .empty { text-align:center; color:var(--muted); padding:30px 0; }
   .badge { background:var(--red); color:#fff; border-radius:99px; font-size:11px; padding:1px 7px; margin-left:4px; }
+  .backdrop { position:fixed; inset:0; background:rgba(10,20,40,.45); z-index:50; display:flex; align-items:flex-end; animation:fade .15s; }
+  @keyframes fade { from { opacity:0 } to { opacity:1 } }
+  .sheet { background:#fff; width:100%; max-width:520px; margin:0 auto; border-radius:20px 20px 0 0; padding:20px 18px calc(20px + env(safe-area-inset-bottom)); animation:rise .2s; }
+  @keyframes rise { from { transform:translateY(40px); opacity:.6 } to { transform:translateY(0); opacity:1 } }
+  .sheet h3 { font-size:17px; margin-bottom:4px; }
+  .eta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0; }
+  .eta-chip { padding:16px 0; border-radius:12px; border:1.5px solid #d8dce3; background:#fff; font-size:16px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; }
+  .eta-chip.sel { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .eta-chip small { display:block; font-size:11px; font-weight:600; color:inherit; opacity:.7; }
 </style>
 </head>
 <body>
@@ -210,10 +219,35 @@ async function setOrder(id, status, extra = {}) {
   await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
   loadOrders();
 }
+let etaOrderId = null, etaChoice = null;
 function confirmOrder(id) {
-  const eta = parseInt(prompt("Prep time in minutes?", "12"));
-  if (!eta || eta < 1 || eta > 120) return;
-  setOrder(id, "confirmed", { eta_minutes: eta });
+  etaOrderId = id; etaChoice = null;
+  const chips = [5, 10, 15, 20, 25, 30, 45, 60].map((m) =>
+    `<button class="eta-chip" id="eta-${m}" onclick="pickEta(${m})">${m}<small>min</small></button>`).join("");
+  const el = document.createElement("div");
+  el.className = "backdrop"; el.id = "etaSheet";
+  el.onclick = (e) => { if (e.target === el) closeEta(); };
+  el.innerHTML = `<div class="sheet">
+      <h3>\u23F1\uFE0F How long until it's ready?</h3>
+      <div class="muted">The student sees a live countdown from this.</div>
+      <div class="eta-grid">${chips}</div>
+      <button class="primary" id="etaGo" disabled onclick="sendEta()">Pick a time</button>
+      <div style="height:8px"></div>
+      <button class="ghost" onclick="closeEta()">Cancel</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+function pickEta(m) {
+  etaChoice = m;
+  document.querySelectorAll(".eta-chip").forEach((c) => c.classList.remove("sel"));
+  $("eta-" + m).classList.add("sel");
+  const go = $("etaGo"); go.disabled = false; go.textContent = `Confirm \u2014 ready in ${m} min`;
+}
+function closeEta() { $("etaSheet")?.remove(); etaOrderId = null; }
+function sendEta() {
+  if (!etaOrderId || !etaChoice) return;
+  const id = etaOrderId; closeEta();
+  setOrder(id, "confirmed", { eta_minutes: etaChoice });
 }
 
 function go(screen) {
