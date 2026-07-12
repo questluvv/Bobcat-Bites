@@ -74,8 +74,15 @@ const sb = supabase.createClient(SUPABASE_URL, KEY);
 let deviceKey = localStorage.getItem("bb_device_key");
 if (!deviceKey) { deviceKey = crypto.randomUUID() + "-" + Math.random().toString(36).slice(2, 10); localStorage.setItem("bb_device_key", deviceKey); }
 
-let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null };
+let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null, truckTimer: null };
 const isOrderable = (t) => !!t && t.is_open && !t.orders_paused;
+// paused_until may not exist until the DB migration lands — fall back to selecting without it
+let hasPausedUntil = true;
+const VCOLS = () => "id,name,description,is_open,orders_paused,default_location" + (hasPausedUntil ? ",paused_until" : "");
+function breakLeftMs(t) {
+  if (!t || !t.orders_paused || !t.paused_until) return null;
+  return Math.max(0, new Date(t.paused_until).getTime() - Date.now());
+}
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -101,7 +108,7 @@ function go(screen) {
   state.screen = screen;
   document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
   $("nav-" + (screen === "orders" ? "orders" : "trucks")).classList.add("active");
-  clearInterval(state.tickTimer);
+  clearInterval(state.tickTimer); clearInterval(state.truckTimer);
   if (screen === "trucks") loadTrucks();
   if (screen === "orders") { requestNotifyPermission(); loadOrders(); state.tickTimer = setInterval(renderIfCounting, 1000); }
   render();
@@ -139,12 +146,27 @@ function startOrderPolling() {
 }
 
 async function loadTrucks() {
-  const { data, error } = await sb.from("vendors").select("id,name,description,is_open,orders_paused,default_location").eq("status", "approved").order("is_open", { ascending: false });
+  let { data, error } = await sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false });
+  if (error && hasPausedUntil) {
+    hasPausedUntil = false;
+    ({ data, error } = await sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false }));
+  }
   state.trucks = error ? [] : data; state.trucksLoaded = true; render();
+}
+
+// While looking at a truck, quietly re-check it so a break ending (or the truck
+// closing) flips the menu without the student having to back out and reload.
+async function refreshTruck() {
+  if (!state.truck || (state.screen !== "menu" && state.screen !== "checkout")) return;
+  const { data } = await sb.from("vendors").select(VCOLS()).eq("id", state.truck.id).maybeSingle();
+  if (data) { const was = isOrderable(state.truck); state.truck = data; if (isOrderable(data) !== was && state.screen === "menu") render(); }
 }
 
 async function openTruck(id) {
   state.truck = state.trucks.find((t) => t.id === id); state.cart = {}; state.screen = "menu"; render();
+  clearInterval(state.tickTimer); clearInterval(state.truckTimer);
+  state.tickTimer = setInterval(renderIfCounting, 1000);
+  state.truckTimer = setInterval(refreshTruck, 10000);
   const { data } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   state.menu = data || []; render();
 }
@@ -185,7 +207,10 @@ async function loadOrders() {
     if (state.screen === "orders") render();
   } catch (e) { /* keep last state */ }
 }
-function renderIfCounting() { if (state.screen === "orders" && state.orders.some((o) => o.status === "confirmed")) render(); }
+function renderIfCounting() {
+  if (state.screen === "orders" && state.orders.some((o) => o.status === "confirmed")) return render();
+  if (state.screen === "menu" && breakLeftMs(state.truck) !== null) render();
+}
 
 function countdownFor(o) {
   if (!o.confirmed_at || !o.eta_minutes) return null;
@@ -203,16 +228,18 @@ function render() {
       (!state.trucksLoaded ? `<div class="empty">Loading trucks…</div>` :
       state.trucks.length ? state.trucks.map((t) => `
         <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
-          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div></div>
+          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div>${breakLeftMs(t) ? `<div class="muted">⏸️ Back in ~${Math.max(1, Math.ceil(breakLeftMs(t) / 60000))} min</div>` : ""}</div>
           <span class="pill ${isOrderable(t) ? "open" : t.is_open ? "soon" : "closed"}">${isOrderable(t) ? "Open" : t.is_open ? "Back soon" : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
   if (state.screen === "menu") {
     const t = state.truck; const orderable = isOrderable(t);
+    const left = breakLeftMs(t);
+    const cd = left ? `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}` : null;
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
       <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>` +
       (orderable ? "" : t.is_open
-        ? `<div class="banner">⏸️ Taking a quick break — back soon! Browse the menu now, ordering reopens shortly.</div>`
+        ? `<div class="banner">⏸️ Taking a quick break — ${cd ? `back in <b style="font-variant-numeric:tabular-nums">${cd}</b>.` : left === 0 ? "back any minute now!" : "back soon!"} Browse the menu meanwhile.</div>`
         : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
       (state.menu.length ? state.menu.map((m) => `
