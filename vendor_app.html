@@ -278,4 +278,6 @@ init();
 // PWA: register service worker (only works over https — i.e. once hosted on Netlify)
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
-}
+}</script>
+</body>
+</html>
