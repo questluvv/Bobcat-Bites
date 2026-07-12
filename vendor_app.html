@@ -311,7 +311,7 @@ function render() {
     v.innerHTML = `<h2>Menu</h2>` +
       (state.menu.map((m) => `
         <div class="card row">
-          <div style="flex:1"><b>${esc(m.name)}</b> · ${money(m.price_cents)}<div class="muted">${esc(m.description || "")} · ~${m.default_prep_minutes} min</div></div>
+          <div style="flex:1"><b>${esc(m.name)}</b> · ${money(m.price_cents)}<div class="muted">${m.description ? esc(m.description) + " · " : ""}~${m.default_prep_minutes} min</div></div>
           <button class="toggle ${m.is_available ? "on" : ""}" title="Available?" onclick="toggleItem('${m.id}', ${!m.is_available})"></button>
           <button class="small b-danger" onclick="deleteItem('${m.id}')">✕</button>
         </div>`).join("") || `<div class="empty">No items yet</div>`) +

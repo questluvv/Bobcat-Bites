@@ -36,12 +36,21 @@ self.addEventListener("push", (e) => {
   }));
 });
 
+// Shared by both apps: student order-update notifications (fired locally from
+// index.html) and vendor new-order push notifications (fired server-side above).
+// Route to whichever page the notification's own data says, defaulting to the
+// student app since that's the more common case.
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
-  e.waitUntil(clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
-    for (const c of list) if (c.url.includes("vendor_app") && "focus" in c) return c.focus();
-    return clients.openWindow(e.notification.data?.url || "./vendor_app.html");
-  }));
+  const target = e.notification.data?.url || "./index.html";
+  const targetFile = target.replace("./", "");
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const existing = list.find((c) => c.url.includes(targetFile));
+      if (existing) return existing.focus();
+      return self.clients.openWindow(target);
+    })
+  );
 });
 
 self.addEventListener("fetch", (e) => {
