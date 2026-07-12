@@ -217,7 +217,13 @@ function countdownFor(o) {
   const readyAt = new Date(o.confirmed_at).getTime() + o.eta_minutes * 60000;
   const left = Math.max(0, readyAt - Date.now());
   const m = Math.floor(left / 60000), s = Math.floor((left % 60000) / 1000);
-  return left === 0 ? "Any second…" : `${m}:${String(s).padStart(2, "0")}`;
+  return { left, text: left === 0 ? "Any second…" : `${m}:${String(s).padStart(2, "0")}` };
+}
+// The motto under the countdown shifts as pickup gets close
+function etaMotto(left) {
+  if (left === 0) return "Eyes on your phone — it's coming out hot 🔥";
+  if (left <= 3 * 60000) return "Almost up — time to head over 🐾";
+  return "Fresh takes a minute. Worth every second 🌯";
 }
 
 function render() {
@@ -273,7 +279,7 @@ function render() {
           ${(o.order_items || []).map((i) => `<div class="item"><span>${i.quantity}× ${esc(i.item_name_snapshot)}</span><span>${money(i.unit_price_cents * i.quantity)}</span></div>`).join("")}
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
           ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div>` : ""}
-          ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd}</div>` : ""}
+          ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd.text}</div><div class="muted" style="text-align:center;margin-bottom:6px">${etaMotto(cd.left)}</div>` : ""}
           ${o.status === "ready" ? `<div class="banner warn" style="font-weight:700">🎉 Ready! Show this code at the window:</div>` : ""}
           ${o.status !== "cancelled" && o.status !== "picked_up" ? `<div class="code">${esc(o.pickup_code || "")}</div>` : ""}
         </div>`;
