@@ -110,6 +110,37 @@ async function login() {
 }
 async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
 
+// ---------- push notifications ----------
+const VAPID_PUBLIC = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
+function b64ToU8(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function alertsStatus() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || location.protocol !== "https:") return "unsupported";
+  if (Notification.permission === "denied") return "blocked";
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  return sub ? "on" : "off";
+}
+async function enableAlerts() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window))
+      return alert("Push isn't supported here. On iPhone: Share \u2192 Add to Home Screen, open the installed app, then enable alerts.");
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return alert("Notifications were blocked. Allow them in your phone settings for this app, then try again.");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(VAPID_PUBLIC) });
+    const { error } = await sb.from("push_subscriptions").upsert(
+      { vendor_id: state.vendor.id, subscription: sub.toJSON() }, { onConflict: "endpoint" });
+    if (error) return alert("Couldn't save the subscription: " + error.message);
+    alert("\ud83d\udd14 Order alerts are ON for this device. You'll get a notification the moment an order comes in \u2014 even with the app closed.");
+    render();
+  } catch (e) { alert("Couldn't enable alerts: " + e.message); }
+}
+
+
 async function createTruck() {
   const rec = {
     owner_user_id: state.user.id,
@@ -258,7 +289,19 @@ function render() {
   }
 
   if (state.screen === "truck") {
-    v.innerHTML = `<div class="card">
+    alertsStatus().then((st) => {
+      const el = $("alertsCard");
+      if (!el) return;
+      el.innerHTML = st === "on"
+        ? `<b>\u{1F514} Order alerts: ON</b><div class="muted">This device gets a notification for every new order, even when the app is closed.</div>`
+        : st === "blocked"
+        ? `<b>\u{1F515} Alerts blocked</b><div class="muted">Enable notifications for this app in your phone settings, then reopen.</div>`
+        : st === "unsupported"
+        ? `<b>\u{1F515} Alerts unavailable here</b><div class="muted">iPhone: Share \u2192 Add to Home Screen, then open the installed app and enable alerts. (Requires the https link, not a local file.)</div>`
+        : `<b>\u{1F515} Order alerts: OFF</b><div class="muted" style="margin-bottom:10px">Get pinged the moment an order comes in \u2014 no need to keep this app open.</div><button class="primary" onclick="enableAlerts()">Enable order alerts</button>`;
+    });
+    v.innerHTML = `<div class="card" id="alertsCard"><span class="muted">Checking alert status\u2026</span></div>
+      <div class="card">
         <div class="row"><h2>${esc(vd.name)}</h2><span class="pill ${vd.status}">${vd.status}</span></div>
         <div class="switch"><div><b>Open for orders</b><div class="muted">Students see you as open</div></div><button class="toggle ${vd.is_open ? "on" : ""}" onclick="toggleVendor('is_open')"></button></div>
         <div class="switch"><div><b>Pause new orders</b><div class="muted">Stay open, stop the queue</div></div><button class="toggle ${vd.orders_paused ? "on" : ""}" onclick="toggleVendor('orders_paused')"></button></div>
