@@ -84,10 +84,41 @@ function go(screen) {
   state.screen = screen;
   document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
   $("nav-" + (screen === "orders" ? "orders" : "trucks")).classList.add("active");
-  clearInterval(state.pollTimer); clearInterval(state.tickTimer);
+  clearInterval(state.tickTimer);
   if (screen === "trucks") loadTrucks();
-  if (screen === "orders") { loadOrders(); state.pollTimer = setInterval(loadOrders, 8000); state.tickTimer = setInterval(renderIfCounting, 1000); }
+  if (screen === "orders") { requestNotifyPermission(); loadOrders(); state.tickTimer = setInterval(renderIfCounting, 1000); }
   render();
+}
+
+// Notifications: poll for order updates in the background (not just while on the
+// Orders tab) so a student browsing other trucks still gets pinged when the vendor
+// sets an ETA or marks their order ready.
+function requestNotifyPermission() {
+  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().then(render).catch(() => {});
+}
+async function notify(title, body) {
+  if (!("Notification" in window) || Notification.permission !== "granted") return;
+  const opts = { body, icon: "icon-192.png", badge: "icon-192.png", tag: "bb-order-update", renotify: true };
+  try {
+    const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
+    if (reg) { reg.showNotification(title, opts); return; }
+  } catch (e) {}
+  try { new Notification(title, opts); } catch (e) {}
+}
+function notifyOrderChanges(prevOrders, freshOrders) {
+  freshOrders.forEach((o) => {
+    const prev = prevOrders.find((p) => p.id === o.id);
+    if (!prev || prev.status === o.status) return;
+    const truck = o.vendors?.name || "The truck";
+    if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
+    if (o.status === "ready") notify("Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+  });
+}
+let orderPollTimer = null;
+function startOrderPolling() {
+  if (orderPollTimer) return;
+  loadOrders();
+  orderPollTimer = setInterval(loadOrders, 8000);
 }
 
 async function loadTrucks() {
@@ -122,13 +153,20 @@ async function placeOrder() {
       items: Object.entries(state.cart).map(([menu_item_id, quantity]) => ({ menu_item_id, quantity })),
     });
     localStorage.setItem("bb_name", $("s_name").value.trim());
+    requestNotifyPermission();
     alert("Order placed! Pickup code: " + res.pickup_code);
     go("orders");
   } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "Place order — demo pay"; }
 }
 
 async function loadOrders() {
-  try { const res = await api({ action: "my_orders", device_key: deviceKey }); state.orders = res.orders || []; render(); } catch (e) { /* keep last state */ }
+  try {
+    const res = await api({ action: "my_orders", device_key: deviceKey });
+    const fresh = res.orders || [];
+    notifyOrderChanges(state.orders, fresh);
+    state.orders = fresh;
+    if (state.screen === "orders") render();
+  } catch (e) { /* keep last state */ }
 }
 function renderIfCounting() { if (state.screen === "orders" && state.orders.some((o) => o.status === "confirmed")) render(); }
 
@@ -178,7 +216,9 @@ function render() {
       </div>`;
   }
   if (state.screen === "orders") {
+    const canAskNotify = "Notification" in window && Notification.permission === "default";
     v.innerHTML = `<h2>My orders</h2>` +
+      (canAskNotify ? `<div class="banner">🔔 <a href="javascript:void(0)" onclick="requestNotifyPermission()" style="color:inherit;font-weight:700">Turn on notifications</a> to know the moment your order's confirmed or ready.</div>` : "") +
       (state.orders.length ? state.orders.map((o) => {
         const cd = o.status === "confirmed" ? countdownFor(o) : null;
         return `<div class="card">
@@ -195,6 +235,7 @@ function render() {
   }
 }
 go("trucks");
+startOrderPolling();
 
 // PWA: register service worker (only works over https — i.e. once hosted on Netlify)
 if ("serviceWorker" in navigator && location.protocol === "https:") {

@@ -22,6 +22,17 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+self.addEventListener("notificationclick", (e) => {
+  e.notification.close();
+  e.waitUntil(
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
+      const existing = clients.find((c) => c.url.includes("index.html"));
+      if (existing) return existing.focus();
+      return self.clients.openWindow("./index.html");
+    })
+  );
+});
+
 self.addEventListener("fetch", (e) => {
   const url = new URL(e.request.url);
   // Never intercept API/data calls — always live
