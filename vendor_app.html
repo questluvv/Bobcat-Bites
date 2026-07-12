@@ -13,7 +13,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root { --navy:#002856; --gold:#DAA900; --bg:#f6f7f9; --ink:#1a2233; --muted:#6b7484; --green:#1a9c5d; --red:#c73838; }
-  * { box-sizing:border-box; margin:0; }
+  * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:84px; }
   header { background:var(--navy); color:#fff; padding:14px 18px; position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; }
   header h1 { font-size:18px; } header h1 span { color:var(--gold); }
@@ -21,11 +21,15 @@
   .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.07); }
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
   .muted { color:var(--muted); font-size:13px; }
-  input, textarea { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; font-family:inherit; }
-  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-size:15px; font-weight:700; cursor:pointer; }
+  input, textarea { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; font-family:inherit; transition:border-color .15s, box-shadow .15s; }
+  input:focus, textarea:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,40,86,.12); }
+  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-size:15px; font-weight:700; cursor:pointer; transition:transform .1s; }
   button.primary:disabled { opacity:.4; }
-  button.ghost { width:100%; background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:12px; padding:12px; font-size:14px; font-weight:700; cursor:pointer; }
-  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; }
+  button.primary:not(:disabled):active { transform:scale(.97); }
+  button.ghost { width:100%; background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:12px; padding:12px; font-size:14px; font-weight:700; cursor:pointer; transition:transform .1s; }
+  button.ghost:active { transform:scale(.97); }
+  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; transition:transform .1s; }
+  button.small:active { transform:scale(.94); }
   .b-confirm { background:#e0ecff; color:#1d4ed8; } .b-ready { background:#e2f6ec; color:var(--green); }
   .b-done { background:#eee; color:#444; } .b-danger { background:#fdeaea; color:var(--red); }
   .pill { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; white-space:nowrap; }
@@ -54,9 +58,15 @@
   @keyframes rise { from { transform:translateY(40px); opacity:.6 } to { transform:translateY(0); opacity:1 } }
   .sheet h3 { font-size:17px; margin-bottom:4px; }
   .eta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0; }
-  .eta-chip { padding:16px 0; border-radius:12px; border:1.5px solid #d8dce3; background:#fff; font-size:16px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; }
+  .eta-chip { padding:16px 0; border-radius:12px; border:1.5px solid #d8dce3; background:#fff; font-size:16px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; transition:transform .1s; }
+  .eta-chip:active { transform:scale(.95); }
   .eta-chip.sel { background:var(--navy); border-color:var(--navy); color:#fff; }
   .eta-chip small { display:block; font-size:11px; font-weight:600; color:inherit; opacity:.7; }
+  .toggle:active { opacity:.85; }
+  .gate { min-height:calc(100vh - 210px); display:flex; align-items:center; }
+  .toast { position:fixed; left:50%; bottom:94px; transform:translateX(-50%) translateY(12px); background:var(--ink); color:#fff; padding:12px 18px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.2); opacity:0; transition:opacity .2s, transform .2s; z-index:100; max-width:86%; text-align:center; pointer-events:none; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.error { background:var(--red); }
 </style>
 </head>
 <body>
@@ -78,6 +88,16 @@ const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
+let toastTimer;
+function toast(msg, kind) {
+  let el = $("toast");
+  if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = "toast show" + (kind === "error" ? " error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
+
 async function init() {
   const { data: { session } } = await sb.auth.getSession();
   state.user = session?.user || null;
@@ -93,8 +113,8 @@ async function loadVendor() {
 
 function readCreds() {
   const email = $("email").value.trim(), pw = $("pw").value;
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert("Type your email in the Email box first."); return null; }
-  if (pw.length < 6) { alert("Password needs at least 6 characters."); return null; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Type your email in the Email box first.", "error"); return null; }
+  if (pw.length < 6) { toast("Password needs at least 6 characters.", "error"); return null; }
   return { email, pw };
 }
 async function signup() {
@@ -107,15 +127,15 @@ async function signup() {
       body: JSON.stringify({ action: "vendor_signup", email: c.email, password: c.pw }),
     });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) return alert(j.error || "Signup failed");
+    if (!r.ok) return toast(j.error || "Signup failed", "error");
     const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
-    if (error) return alert("Account created — now log in: " + error.message);
-  } catch (e) { alert("Signup failed: " + e.message); }
+    if (error) return toast("Account created — now log in: " + error.message, "error");
+  } catch (e) { toast("Signup failed: " + e.message, "error"); }
 }
 async function login() {
   const c = readCreds(); if (!c) return;
   const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
-  if (error) return alert(error.message);
+  if (error) return toast(error.message, "error");
 }
 async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
 
@@ -144,7 +164,7 @@ async function enableAlerts() {
     const { error } = await sb.from("push_subscriptions").upsert(
       { vendor_id: state.vendor.id, subscription: sub.toJSON() }, { onConflict: "endpoint" });
     if (error) return alert("Couldn't save the subscription: " + error.message);
-    alert("\ud83d\udd14 Order alerts are ON for this device. You'll get a notification the moment an order comes in \u2014 even with the app closed.");
+    toast("\ud83d\udd14 Order alerts are ON for this device.");
     render();
   } catch (e) { alert("Couldn't enable alerts: " + e.message); }
 }
@@ -159,9 +179,9 @@ async function createTruck() {
     contact_email: state.user.email,
     default_location: $("t_loc").value.trim(),
   };
-  if (!rec.name) return alert("Truck name required");
+  if (!rec.name) return toast("Truck name required", "error");
   const { error } = await sb.from("vendors").insert(rec);
-  if (error) return alert(error.message);
+  if (error) return toast(error.message, "error");
   await loadVendor(); render();
 }
 
@@ -171,12 +191,12 @@ async function saveTruck() {
     contact_phone: $("t_phone").value.trim(), default_location: $("t_loc").value.trim(),
     updated_at: new Date().toISOString(),
   }).eq("id", state.vendor.id);
-  alert(error ? error.message : "Saved ✓"); await loadVendor(); render();
+  toast(error ? error.message : "Saved ✓", error ? "error" : undefined); await loadVendor(); render();
 }
 
 async function toggleVendor(field) {
   const { error } = await sb.from("vendors").update({ [field]: !state.vendor[field], updated_at: new Date().toISOString() }).eq("id", state.vendor.id);
-  if (error) return alert(error.message);
+  if (error) return toast(error.message, "error");
   await loadVendor(); render();
 }
 
@@ -187,13 +207,14 @@ async function loadMenu() {
 }
 async function addItem() {
   const name = $("m_name").value.trim(), price = Math.round(parseFloat($("m_price").value) * 100), prep = parseInt($("m_prep").value) || 10;
-  if (!name || !(price >= 0)) return alert("Name and a valid price required");
+  if (!name || !(price >= 0)) return toast("Name and a valid price required", "error");
   const { error } = await sb.from("menu_items").insert({ vendor_id: state.vendor.id, name, description: $("m_desc").value.trim(), price_cents: price, default_prep_minutes: prep });
-  if (error) return alert(error.message);
+  if (error) return toast(error.message, "error");
+  toast(`${name} added to menu`);
   loadMenu();
 }
 async function toggleItem(id, val) { await sb.from("menu_items").update({ is_available: val, updated_at: new Date().toISOString() }).eq("id", id); loadMenu(); }
-async function deleteItem(id) { if (!confirm("Delete this item?")) return; const { error } = await sb.from("menu_items").delete().eq("id", id); if (error) alert("Can't delete (already ordered?) — mark unavailable instead."); loadMenu(); }
+async function deleteItem(id) { if (!confirm("Delete this item?")) return; const { error } = await sb.from("menu_items").delete().eq("id", id); if (error) toast("Can't delete (already ordered?) — mark unavailable instead.", "error"); loadMenu(); }
 
 // ---------- orders ----------
 async function loadOrders() {
@@ -215,7 +236,7 @@ async function setOrder(id, status, extra = {}) {
   if (status === "picked_up") patch.picked_up_at = new Date().toISOString();
   if (status === "cancelled") patch.cancelled_at = new Date().toISOString();
   const { error } = await sb.from("orders").update(patch).eq("id", id);
-  if (error) return alert(error.message);
+  if (error) return toast(error.message, "error");
   await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
   loadOrders();
 }
@@ -265,22 +286,22 @@ function render() {
   clearInterval(state.pollTimer);
 
   if (!state.user) {
-    v.innerHTML = `<div class="card"><h2>Truck owner sign in</h2>
+    v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();login()"><h2>Truck owner sign in</h2>
       <input id="email" type="email" placeholder="Email" autocomplete="username">
       <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password">
-      <button class="primary" onclick="login()">Log in</button>
+      <button class="primary" type="submit">Log in</button>
       <div style="height:8px"></div>
-      <button class="ghost" onclick="signup()">Create account</button>
-      <p class="muted" style="margin-top:10px">New here? Fill in email + password above, then hit Create account — you'll be logged in instantly.</p></div>`;
+      <button class="ghost" type="button" onclick="signup()">Create account</button>
+      <p class="muted" style="margin-top:10px">New here? Fill in email + password above, then hit Create account — you'll be logged in instantly.</p></form></div>`;
     return;
   }
   if (!state.vendor) {
-    v.innerHTML = `<div class="card"><h2>Register your truck</h2>
+    v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();createTruck()"><h2>Register your truck</h2>
       <input id="t_name" placeholder="Truck name *">
       <textarea id="t_desc" rows="2" placeholder="Short description (cuisine, favorites)"></textarea>
       <input id="t_phone" placeholder="Contact phone">
       <input id="t_loc" placeholder="Usual campus spot (e.g. Scholars Lane)">
-      <button class="primary" onclick="createTruck()">Submit for approval</button></div>`;
+      <button class="primary" type="submit">Submit for approval</button></form></div>`;
     return;
   }
 
