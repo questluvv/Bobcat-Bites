@@ -151,7 +151,12 @@ function notifyOrderChanges(prevOrders, freshOrders) {
     const truck = o.vendors?.name || "The truck";
     if (prev && prev.status !== o.status) {
       if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
-      if (o.status === "ready") notify("Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+      if (o.status === "ready") {
+        // The vendor can mark ready before the ETA runs out — call that out so
+        // the student knows not to wait for the countdown.
+        const early = o.confirmed_at && o.eta_minutes && new Date(o.confirmed_at).getTime() + o.eta_minutes * 60000 > Date.now() + 60000;
+        notify(early ? "Ready early — it beat the clock! 🏃" : "Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+      }
       return;
     }
     // Heads-up inside the last 3 minutes of the countdown so the student
