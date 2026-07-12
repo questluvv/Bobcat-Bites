@@ -203,14 +203,14 @@ function render() {
       state.trucks.length ? state.trucks.map((t) => `
         <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
           <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div></div>
-          <span class="pill ${isOrderable(t) ? "open" : "closed"}">${t.is_open ? (t.orders_paused ? "Paused" : "Open") : "Closed"}</span>
+          <span class="pill ${isOrderable(t) ? "open" : "closed"}">${isOrderable(t) ? "Open" : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
   if (state.screen === "menu") {
     const t = state.truck; const orderable = isOrderable(t);
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
       <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>` +
-      (orderable ? "" : `<div class="banner warn">🚫 ${t.orders_paused ? "This truck has paused new orders" : "This truck is currently closed"} — you can browse the menu but can't order right now.</div>`) +
+      (orderable ? "" : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
       (state.menu.length ? state.menu.map((m) => `
         <div class="item">
