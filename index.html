@@ -31,6 +31,9 @@
   .item:last-child { border-bottom:none; }
   .qty { display:flex; align-items:center; gap:10px; }
   .qty button { width:32px; height:32px; border-radius:8px; border:1px solid #d8dce3; background:#fff; font-size:18px; font-weight:700; color:var(--navy); }
+  .qty button:disabled { opacity:.35; cursor:not-allowed; }
+  .truck.unorderable { opacity:.6; }
+  .banner.warn { background:#fdeaea; border-color:#f6c6c6; color:#8a2626; }
   button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; }
   button.primary:disabled { opacity:.4; }
   button.link { background:none; border:none; color:var(--navy); font-weight:600; font-size:14px; cursor:pointer; padding:0 0 10px; }
@@ -64,7 +67,8 @@ const sb = supabase.createClient(SUPABASE_URL, KEY);
 let deviceKey = localStorage.getItem("bb_device_key");
 if (!deviceKey) { deviceKey = crypto.randomUUID() + "-" + Math.random().toString(36).slice(2, 10); localStorage.setItem("bb_device_key", deviceKey); }
 
-let state = { screen: "trucks", trucks: [], menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null };
+let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null };
+const isOrderable = (t) => !!t && t.is_open && !t.orders_paused;
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -88,16 +92,17 @@ function go(screen) {
 
 async function loadTrucks() {
   const { data, error } = await sb.from("vendors").select("id,name,description,is_open,orders_paused,default_location").eq("status", "approved").order("is_open", { ascending: false });
-  state.trucks = error ? [] : data; render();
+  state.trucks = error ? [] : data; state.trucksLoaded = true; render();
 }
 
 async function openTruck(id) {
   state.truck = state.trucks.find((t) => t.id === id); state.cart = {}; state.screen = "menu"; render();
-  const { data } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("price_cents", { ascending: false });
+  const { data } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   state.menu = data || []; render();
 }
 
 function setQty(itemId, delta) {
+  if (!isOrderable(state.truck)) return;
   state.cart[itemId] = Math.max(0, (state.cart[itemId] || 0) + delta);
   if (!state.cart[itemId]) delete state.cart[itemId];
   render();
@@ -106,6 +111,8 @@ const cartCount = () => Object.values(state.cart).reduce((a, b) => a + b, 0);
 const cartTotal = () => Object.entries(state.cart).reduce((sum, [id, q]) => sum + (state.menu.find((m) => m.id === id)?.price_cents || 0) * q, 0);
 
 async function placeOrder() {
+  if (!isOrderable(state.truck)) { alert("This truck isn't accepting orders right now."); go("trucks"); return; }
+  if (!$("s_name").value.trim()) { alert("Enter your name so the truck knows who to make it for."); $("s_name").focus(); return; }
   const btn = $("placeBtn"); btn.disabled = true; btn.textContent = "Placing…";
   try {
     const res = await api({
@@ -138,23 +145,25 @@ function render() {
   if (state.screen === "trucks") {
     v.innerHTML = `<div class="banner">🧪 Test mode — payment is simulated (Stripe not connected yet). Orders are real in the system.</div>
       <h2>Food trucks on campus</h2>` +
-      (state.trucks.length ? state.trucks.map((t) => `
-        <div class="card truck" onclick="openTruck('${t.id}')">
+      (!state.trucksLoaded ? `<div class="empty">Loading trucks…</div>` :
+      state.trucks.length ? state.trucks.map((t) => `
+        <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
           <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div></div>
-          <span class="pill ${t.is_open && !t.orders_paused ? "open" : "closed"}">${t.is_open ? (t.orders_paused ? "Paused" : "Open") : "Closed"}</span>
+          <span class="pill ${isOrderable(t) ? "open" : "closed"}">${t.is_open ? (t.orders_paused ? "Paused" : "Open") : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
   if (state.screen === "menu") {
-    const t = state.truck;
+    const t = state.truck; const orderable = isOrderable(t);
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
-      <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>
-      <div class="card">` +
+      <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>` +
+      (orderable ? "" : `<div class="banner warn">🚫 ${t.orders_paused ? "This truck has paused new orders" : "This truck is currently closed"} — you can browse the menu but can't order right now.</div>`) +
+      `<div class="card">` +
       (state.menu.length ? state.menu.map((m) => `
         <div class="item">
-          <div style="flex:1"><b>${esc(m.name)}</b><div class="muted">${esc(m.description || "")}</div><div class="muted">${money(m.price_cents)} · ~${m.default_prep_minutes} min</div></div>
-          <div class="qty"><button onclick="setQty('${m.id}',-1)">−</button><b>${state.cart[m.id] || 0}</b><button onclick="setQty('${m.id}',1)">+</button></div>
+          <div style="flex:1"><b>${esc(m.name)}</b>${m.description ? `<div class="muted">${esc(m.description)}</div>` : ""}<div class="muted">${money(m.price_cents)} · ~${m.default_prep_minutes} min</div></div>
+          <div class="qty"><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',-1)">−</button><b>${state.cart[m.id] || 0}</b><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',1)">+</button></div>
         </div>`).join("") : `<div class="empty">Loading menu…</div>`) + `</div>` +
-      (cartCount() ? `<button class="primary" onclick="state.screen='checkout';render()">Checkout · ${cartCount()} item${cartCount() > 1 ? "s" : ""} · ${money(cartTotal())}</button>` : "");
+      (orderable && cartCount() ? `<button class="primary" onclick="state.screen='checkout';render()">Checkout · ${cartCount()} item${cartCount() > 1 ? "s" : ""} · ${money(cartTotal())}</button>` : "");
   }
   if (state.screen === "checkout") {
     v.innerHTML = `<button class="link" onclick="state.screen='menu';render()">← Back to menu</button>

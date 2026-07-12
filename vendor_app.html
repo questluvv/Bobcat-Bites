@@ -64,7 +64,7 @@ const SUPABASE_URL = "https://gqwihtfjmxqxkzssnsrk.supabase.co";
 const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
 const sb = supabase.createClient(SUPABASE_URL, KEY);
 
-let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null };
+let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null, etaEditing: null };
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -165,7 +165,7 @@ async function loadOrders() {
   state.orders = data || [];
   const n = state.orders.filter((o) => o.status === "placed").length;
   $("orderBadge").innerHTML = n ? `<span class="badge">${n}</span>` : "";
-  if (state.screen === "orders") render();
+  if (state.screen === "orders" && !state.etaEditing) render();
 }
 
 async function setOrder(id, status, extra = {}) {
@@ -179,9 +179,12 @@ async function setOrder(id, status, extra = {}) {
   await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
   loadOrders();
 }
-function confirmOrder(id) {
-  const eta = parseInt(prompt("Prep time in minutes?", "12"));
-  if (!eta || eta < 1 || eta > 120) return;
+function startEta(id) { state.etaEditing = id; render(); }
+function cancelEta() { state.etaEditing = null; render(); }
+function submitEta(id) {
+  const eta = parseInt($("eta-" + id).value, 10);
+  if (!eta || eta < 1 || eta > 120) return alert("Enter a prep time between 1 and 120 minutes.");
+  state.etaEditing = null;
   setOrder(id, "confirmed", { eta_minutes: eta });
 }
 
@@ -234,7 +237,8 @@ function render() {
             <div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${o.students?.phone ? " · 📱 " + esc(o.students.phone) : ""}${o.eta_minutes ? " · ETA " + o.eta_minutes + " min" : ""}</div>
             ${(o.order_items || []).map((i) => `<div class="item"><b>${i.quantity}×</b> ${esc(i.item_name_snapshot)}${i.notes ? `<div class="muted">📝 ${esc(i.notes)}</div>` : ""}</div>`).join("")}
             <div class="row" style="margin-top:10px">
-              ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
+              ${st === "placed" && state.etaEditing === o.id ? `<input id="eta-${o.id}" type="number" inputmode="numeric" min="1" max="120" value="12" placeholder="Min" style="width:70px;flex:none;margin-bottom:0"><button class="small b-confirm" style="flex:1" onclick="submitEta('${o.id}')">Confirm ETA</button><button class="small b-done" onclick="cancelEta()">✕</button>` : ""}
+              ${st === "placed" && state.etaEditing !== o.id ? `<button class="small b-confirm" style="flex:1" onclick="startEta('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
               ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button>` : ""}
               ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button>` : ""}
             </div>
@@ -246,7 +250,7 @@ function render() {
     v.innerHTML = `<h2>Menu</h2>` +
       (state.menu.map((m) => `
         <div class="card row">
-          <div style="flex:1"><b>${esc(m.name)}</b> · ${money(m.price_cents)}<div class="muted">${esc(m.description || "")} · ~${m.default_prep_minutes} min</div></div>
+          <div style="flex:1"><b>${esc(m.name)}</b> · ${money(m.price_cents)}<div class="muted">${m.description ? esc(m.description) + " · " : ""}~${m.default_prep_minutes} min</div></div>
           <button class="toggle ${m.is_available ? "on" : ""}" title="Available?" onclick="toggleItem('${m.id}', ${!m.is_available})"></button>
           <button class="small b-danger" onclick="deleteItem('${m.id}')">✕</button>
         </div>`).join("") || `<div class="empty">No items yet</div>`) +
