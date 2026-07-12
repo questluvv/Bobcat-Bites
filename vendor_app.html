@@ -48,6 +48,15 @@
   .code { font-weight:800; letter-spacing:3px; color:var(--gold); background:var(--navy); border-radius:8px; padding:2px 10px; }
   .empty { text-align:center; color:var(--muted); padding:30px 0; }
   .badge { background:var(--red); color:#fff; border-radius:99px; font-size:11px; padding:1px 7px; margin-left:4px; }
+  .backdrop { position:fixed; inset:0; background:rgba(10,20,40,.45); z-index:50; display:flex; align-items:flex-end; animation:fade .15s; }
+  @keyframes fade { from { opacity:0 } to { opacity:1 } }
+  .sheet { background:#fff; width:100%; max-width:520px; margin:0 auto; border-radius:20px 20px 0 0; padding:20px 18px calc(20px + env(safe-area-inset-bottom)); animation:rise .2s; }
+  @keyframes rise { from { transform:translateY(40px); opacity:.6 } to { transform:translateY(0); opacity:1 } }
+  .sheet h3 { font-size:17px; margin-bottom:4px; }
+  .eta-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:16px 0; }
+  .eta-chip { padding:16px 0; border-radius:12px; border:1.5px solid #d8dce3; background:#fff; font-size:16px; font-weight:700; color:var(--ink); cursor:pointer; text-align:center; }
+  .eta-chip.sel { background:var(--navy); border-color:var(--navy); color:#fff; }
+  .eta-chip small { display:block; font-size:11px; font-weight:600; color:inherit; opacity:.7; }
 </style>
 </head>
 <body>
@@ -64,7 +73,7 @@ const SUPABASE_URL = "https://gqwihtfjmxqxkzssnsrk.supabase.co";
 const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
 const sb = supabase.createClient(SUPABASE_URL, KEY);
 
-let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null, etaEditing: null };
+let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null };
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -109,6 +118,37 @@ async function login() {
   if (error) return alert(error.message);
 }
 async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
+
+// ---------- push notifications ----------
+const VAPID_PUBLIC = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
+function b64ToU8(s) {
+  const pad = "=".repeat((4 - (s.length % 4)) % 4);
+  const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
+  return Uint8Array.from([...raw].map((c) => c.charCodeAt(0)));
+}
+async function alertsStatus() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window) || location.protocol !== "https:") return "unsupported";
+  if (Notification.permission === "denied") return "blocked";
+  const reg = await navigator.serviceWorker.ready;
+  const sub = await reg.pushManager.getSubscription();
+  return sub ? "on" : "off";
+}
+async function enableAlerts() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window))
+      return alert("Push isn't supported here. On iPhone: Share \u2192 Add to Home Screen, open the installed app, then enable alerts.");
+    const perm = await Notification.requestPermission();
+    if (perm !== "granted") return alert("Notifications were blocked. Allow them in your phone settings for this app, then try again.");
+    const reg = await navigator.serviceWorker.ready;
+    const sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64ToU8(VAPID_PUBLIC) });
+    const { error } = await sb.from("push_subscriptions").upsert(
+      { vendor_id: state.vendor.id, subscription: sub.toJSON() }, { onConflict: "endpoint" });
+    if (error) return alert("Couldn't save the subscription: " + error.message);
+    alert("\ud83d\udd14 Order alerts are ON for this device. You'll get a notification the moment an order comes in \u2014 even with the app closed.");
+    render();
+  } catch (e) { alert("Couldn't enable alerts: " + e.message); }
+}
+
 
 async function createTruck() {
   const rec = {
@@ -165,7 +205,7 @@ async function loadOrders() {
   state.orders = data || [];
   const n = state.orders.filter((o) => o.status === "placed").length;
   $("orderBadge").innerHTML = n ? `<span class="badge">${n}</span>` : "";
-  if (state.screen === "orders" && !state.etaEditing) render();
+  if (state.screen === "orders") render();
 }
 
 async function setOrder(id, status, extra = {}) {
@@ -179,13 +219,35 @@ async function setOrder(id, status, extra = {}) {
   await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
   loadOrders();
 }
-function startEta(id) { state.etaEditing = id; render(); }
-function cancelEta() { state.etaEditing = null; render(); }
-function submitEta(id) {
-  const eta = parseInt($("eta-" + id).value, 10);
-  if (!eta || eta < 1 || eta > 120) return alert("Enter a prep time between 1 and 120 minutes.");
-  state.etaEditing = null;
-  setOrder(id, "confirmed", { eta_minutes: eta });
+let etaOrderId = null, etaChoice = null;
+function confirmOrder(id) {
+  etaOrderId = id; etaChoice = null;
+  const chips = [5, 10, 15, 20, 25, 30, 45, 60].map((m) =>
+    `<button class="eta-chip" id="eta-${m}" onclick="pickEta(${m})">${m}<small>min</small></button>`).join("");
+  const el = document.createElement("div");
+  el.className = "backdrop"; el.id = "etaSheet";
+  el.onclick = (e) => { if (e.target === el) closeEta(); };
+  el.innerHTML = `<div class="sheet">
+      <h3>\u23F1\uFE0F How long until it's ready?</h3>
+      <div class="muted">The student sees a live countdown from this.</div>
+      <div class="eta-grid">${chips}</div>
+      <button class="primary" id="etaGo" disabled onclick="sendEta()">Pick a time</button>
+      <div style="height:8px"></div>
+      <button class="ghost" onclick="closeEta()">Cancel</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+function pickEta(m) {
+  etaChoice = m;
+  document.querySelectorAll(".eta-chip").forEach((c) => c.classList.remove("sel"));
+  $("eta-" + m).classList.add("sel");
+  const go = $("etaGo"); go.disabled = false; go.textContent = `Confirm \u2014 ready in ${m} min`;
+}
+function closeEta() { $("etaSheet")?.remove(); etaOrderId = null; }
+function sendEta() {
+  if (!etaOrderId || !etaChoice) return;
+  const id = etaOrderId; closeEta();
+  setOrder(id, "confirmed", { eta_minutes: etaChoice });
 }
 
 function go(screen) {
@@ -237,8 +299,7 @@ function render() {
             <div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${o.students?.phone ? " · 📱 " + esc(o.students.phone) : ""}${o.eta_minutes ? " · ETA " + o.eta_minutes + " min" : ""}</div>
             ${(o.order_items || []).map((i) => `<div class="item"><b>${i.quantity}×</b> ${esc(i.item_name_snapshot)}${i.notes ? `<div class="muted">📝 ${esc(i.notes)}</div>` : ""}</div>`).join("")}
             <div class="row" style="margin-top:10px">
-              ${st === "placed" && state.etaEditing === o.id ? `<input id="eta-${o.id}" type="number" inputmode="numeric" min="1" max="120" value="12" placeholder="Min" style="width:70px;flex:none;margin-bottom:0"><button class="small b-confirm" style="flex:1" onclick="submitEta('${o.id}')">Confirm ETA</button><button class="small b-done" onclick="cancelEta()">✕</button>` : ""}
-              ${st === "placed" && state.etaEditing !== o.id ? `<button class="small b-confirm" style="flex:1" onclick="startEta('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
+              ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
               ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button>` : ""}
               ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button>` : ""}
             </div>
@@ -262,7 +323,19 @@ function render() {
   }
 
   if (state.screen === "truck") {
-    v.innerHTML = `<div class="card">
+    alertsStatus().then((st) => {
+      const el = $("alertsCard");
+      if (!el) return;
+      el.innerHTML = st === "on"
+        ? `<b>\u{1F514} Order alerts: ON</b><div class="muted">This device gets a notification for every new order, even when the app is closed.</div>`
+        : st === "blocked"
+        ? `<b>\u{1F515} Alerts blocked</b><div class="muted">Enable notifications for this app in your phone settings, then reopen.</div>`
+        : st === "unsupported"
+        ? `<b>\u{1F515} Alerts unavailable here</b><div class="muted">iPhone: Share \u2192 Add to Home Screen, then open the installed app and enable alerts. (Requires the https link, not a local file.)</div>`
+        : `<b>\u{1F515} Order alerts: OFF</b><div class="muted" style="margin-bottom:10px">Get pinged the moment an order comes in \u2014 no need to keep this app open.</div><button class="primary" onclick="enableAlerts()">Enable order alerts</button>`;
+    });
+    v.innerHTML = `<div class="card" id="alertsCard"><span class="muted">Checking alert status\u2026</span></div>
+      <div class="card">
         <div class="row"><h2>${esc(vd.name)}</h2><span class="pill ${vd.status}">${vd.status}</span></div>
         <div class="switch"><div><b>Open for orders</b><div class="muted">Students see you as open</div></div><button class="toggle ${vd.is_open ? "on" : ""}" onclick="toggleVendor('is_open')"></button></div>
         <div class="switch"><div><b>Pause new orders</b><div class="muted">Stay open, stop the queue</div></div><button class="toggle ${vd.orders_paused ? "on" : ""}" onclick="toggleVendor('orders_paused')"></button></div>

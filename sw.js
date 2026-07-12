@@ -1,6 +1,6 @@
-// Bobcat Bites service worker — v1
+// Bobcat Bites service worker — v3
 // Network-first for pages (so updates ship instantly), cache fallback for offline shell.
-const CACHE = "bobcat-bites-v2";
+const CACHE = "bobcat-bites-v3";
 const SHELL = [
   "./index.html",
   "./vendor_app.html",
@@ -22,13 +22,33 @@ self.addEventListener("activate", (e) => {
   );
 });
 
+// --- Web Push: new-order alerts for vendors ---
+self.addEventListener("push", (e) => {
+  let d = {};
+  try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  e.waitUntil(self.registration.showNotification(d.title || "Bobcat Bites", {
+    body: d.body || "You have a new order.",
+    tag: d.tag || "new-order",
+    icon: "icon-vendor-192.png",
+    badge: "icon-vendor-192.png",
+    data: { url: d.url || "./vendor_app.html" },
+    requireInteraction: true,
+  }));
+});
+
+// Shared by both apps: student order-update notifications (fired locally from
+// index.html) and vendor new-order push notifications (fired server-side above).
+// Route to whichever page the notification's own data says, defaulting to the
+// student app since that's the more common case.
 self.addEventListener("notificationclick", (e) => {
   e.notification.close();
+  const target = e.notification.data?.url || "./index.html";
+  const targetFile = target.replace("./", "");
   e.waitUntil(
-    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((clients) => {
-      const existing = clients.find((c) => c.url.includes("index.html"));
+    self.clients.matchAll({ type: "window", includeUncontrolled: true }).then((list) => {
+      const existing = list.find((c) => c.url.includes(targetFile));
       if (existing) return existing.focus();
-      return self.clients.openWindow("./index.html");
+      return self.clients.openWindow(target);
     })
   );
 });
