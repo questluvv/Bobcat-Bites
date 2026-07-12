@@ -13,7 +13,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
   :root { --navy:#002856; --gold:#DAA900; --bg:#f6f7f9; --card:#fff; --ink:#1a2233; --muted:#6b7484; --green:#1a9c5d; --red:#c73838; }
-  * { box-sizing:border-box; margin:0; }
+  * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:84px; }
   header { background:var(--navy); color:#fff; padding:16px 20px; position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; }
   header h1 { font-size:20px; } header h1 span { color:var(--gold); }
@@ -34,10 +34,16 @@
   .qty button:disabled { opacity:.35; cursor:not-allowed; }
   .truck.unorderable { opacity:.6; }
   .banner.warn { background:#fdeaea; border-color:#f6c6c6; color:#8a2626; }
-  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; }
+  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; transition:transform .1s; }
   button.primary:disabled { opacity:.4; }
+  button.primary:not(:disabled):active { transform:scale(.97); }
   button.link { background:none; border:none; color:var(--navy); font-weight:600; font-size:14px; cursor:pointer; padding:0 0 10px; }
-  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; }
+  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; transition:border-color .15s, box-shadow .15s; }
+  input:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,40,86,.12); }
+  .qty button:not(:disabled):active { transform:scale(.92); }
+  .toast { position:fixed; left:50%; bottom:94px; transform:translateX(-50%) translateY(12px); background:var(--ink); color:#fff; padding:12px 18px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.2); opacity:0; transition:opacity .2s, transform .2s; z-index:100; max-width:86%; text-align:center; pointer-events:none; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.error { background:var(--red); }
   nav { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e6e8ec; display:flex; }
   nav button { flex:1; padding:12px 0 18px; border:none; background:none; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; }
   nav button.active { color:var(--navy); }
@@ -72,6 +78,16 @@ const isOrderable = (t) => !!t && t.is_open && !t.orders_paused;
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+
+let toastTimer;
+function toast(msg, kind) {
+  let el = $("toast");
+  if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = "toast show" + (kind === "error" ? " error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
 
 async function api(payload) {
   const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
@@ -142,8 +158,8 @@ const cartCount = () => Object.values(state.cart).reduce((a, b) => a + b, 0);
 const cartTotal = () => Object.entries(state.cart).reduce((sum, [id, q]) => sum + (state.menu.find((m) => m.id === id)?.price_cents || 0) * q, 0);
 
 async function placeOrder() {
-  if (!isOrderable(state.truck)) { alert("This truck isn't accepting orders right now."); go("trucks"); return; }
-  if (!$("s_name").value.trim()) { alert("Enter your name so the truck knows who to make it for."); $("s_name").focus(); return; }
+  if (!isOrderable(state.truck)) { toast("This truck isn't accepting orders right now.", "error"); go("trucks"); return; }
+  if (!$("s_name").value.trim()) { toast("Enter your name so the truck knows who to make it for.", "error"); $("s_name").focus(); return; }
   const btn = $("placeBtn"); btn.disabled = true; btn.textContent = "Placing…";
   try {
     const res = await api({
@@ -154,9 +170,9 @@ async function placeOrder() {
     });
     localStorage.setItem("bb_name", $("s_name").value.trim());
     requestNotifyPermission();
-    alert("Order placed! Pickup code: " + res.pickup_code);
     go("orders");
-  } catch (e) { alert(e.message); btn.disabled = false; btn.textContent = "Place order — demo pay"; }
+    toast("Order placed! Code " + res.pickup_code);
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Place order — demo pay"; }
 }
 
 async function loadOrders() {
@@ -208,12 +224,12 @@ function render() {
       <div class="card"><h2>Checkout — ${esc(state.truck.name)}</h2>` +
       Object.entries(state.cart).map(([id, q]) => { const m = state.menu.find((x) => x.id === id); return `<div class="item"><span>${q}× ${esc(m.name)}</span><span>${money(m.price_cents * q)}</span></div>`; }).join("") +
       `<div class="total"><span>Total</span><span>${money(cartTotal())}</span></div></div>
-      <div class="card"><h3 style="margin-bottom:10px">Your info</h3>
+      <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">
-        <input id="s_phone" placeholder="Phone (optional)">
+        <input id="s_phone" type="tel" placeholder="Phone (optional)">
         <div class="banner">Demo payment — no card charged. Stripe checkout replaces this button later.</div>
-        <button class="primary" id="placeBtn" onclick="placeOrder()">Place order — demo pay</button>
-      </div>`;
+        <button class="primary" type="submit" id="placeBtn">Place order — demo pay</button>
+      </form>`;
   }
   if (state.screen === "orders") {
     const canAskNotify = "Notification" in window && Notification.permission === "default";

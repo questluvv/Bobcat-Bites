@@ -6,20 +6,27 @@
 <title>Bobcat Bites — Admin</title>
 <style>
   :root { --navy:#002856; --gold:#DAA900; --green:#1a9c5d; --red:#c73838; --muted:#6b7484; }
-  * { box-sizing:border-box; margin:0; }
+  * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f6f7f9; color:#1a2233; }
   header { background:var(--navy); color:#fff; padding:14px 18px; } header h1 { font-size:18px; } header span { color:var(--gold); }
   main { max-width:560px; margin:0 auto; padding:16px; }
   .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.07); }
-  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; }
-  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-weight:700; font-size:15px; cursor:pointer; }
-  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; }
+  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; transition:border-color .15s, box-shadow .15s; }
+  input:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,40,86,.12); }
+  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-weight:700; font-size:15px; cursor:pointer; transition:transform .1s; }
+  button.primary:active { transform:scale(.97); }
+  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; transition:transform .1s; }
+  button.small:active { transform:scale(.94); }
   .approve { background:#e2f6ec; color:var(--green); } .suspend { background:#fdeaea; color:var(--red); } .pend { background:#fff3d6; color:#8a6d00; }
   .pill { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; }
   .pill.pending { background:#fff3d6; color:#8a6d00; } .pill.approved { background:#e2f6ec; color:var(--green); } .pill.suspended { background:#fdeaea; color:var(--red); }
   .muted { color:var(--muted); font-size:13px; }
   .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
   h3 { font-size:15px; }
+  .gate { min-height:calc(100vh - 110px); display:flex; align-items:center; }
+  .toast { position:fixed; left:50%; bottom:24px; transform:translateX(-50%) translateY(12px); background:#1a2233; color:#fff; padding:12px 18px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.2); opacity:0; transition:opacity .2s, transform .2s; z-index:100; max-width:86%; text-align:center; pointer-events:none; }
+  .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
+  .toast.error { background:var(--red); }
 </style>
 </head>
 <body>
@@ -33,6 +40,16 @@ let vendors = [];
 const $ = (id) => document.getElementById(id);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
 
+let toastTimer;
+function toast(msg, kind) {
+  let el = $("toast");
+  if (!el) { el = document.createElement("div"); el.id = "toast"; document.body.appendChild(el); }
+  el.textContent = msg;
+  el.className = "toast show" + (kind === "error" ? " error" : "");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
+}
+
 async function api(payload) {
   const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
   const j = await r.json().catch(() => ({}));
@@ -43,24 +60,24 @@ async function api(payload) {
 async function unlock() {
   pin = $("pin").value.trim();
   try { await load(); sessionStorage.setItem("bb_admin_pin", pin); }
-  catch (e) { alert(e.message); pin = ""; }
+  catch (e) { toast(e.message, "error"); pin = ""; }
 }
 async function load() {
   const res = await api({ action: "admin_list", pin });
   vendors = res.vendors; render();
 }
 async function setStatus(id, status) {
-  await api({ action: "admin_set_status", pin, vendor_id: id, status });
-  load();
+  try { await api({ action: "admin_set_status", pin, vendor_id: id, status }); load(); }
+  catch (e) { toast(e.message, "error"); }
 }
 
 function render() {
   const v = $("view");
   if (!pin || !vendors.length && !vendors._loaded) { /* fallthrough below handles */ }
   if (!pin) {
-    v.innerHTML = `<div class="card"><h3 style="margin-bottom:10px">Enter admin PIN</h3>
-      <input id="pin" type="password" inputmode="numeric" placeholder="PIN">
-      <button class="primary" onclick="unlock()">Unlock</button></div>`;
+    v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();unlock()"><h3 style="margin-bottom:10px">Enter admin PIN</h3>
+      <input id="pin" type="password" inputmode="numeric" placeholder="PIN" autofocus>
+      <button class="primary" type="submit">Unlock</button></form></div>`;
     return;
   }
   const pending = vendors.filter((x) => x.status === "pending");
