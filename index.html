@@ -5,58 +5,59 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
 <title>Bobcat Bites</title>
 <link rel="manifest" href="manifest-student.webmanifest">
-<meta name="theme-color" content="#002856">
+<meta name="theme-color" content="#ffffff">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Bobcat Bites">
 <link rel="apple-touch-icon" href="icon-192.png">
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
 <style>
-  :root { --navy:#002856; --gold:#DAA900; --bg:#f6f7f9; --card:#fff; --ink:#1a2233; --muted:#6b7484; --green:#1a9c5d; --red:#c73838; }
+  :root { --blue:#1a73e8; --blue-dark:#135cc0; --blue-light:#e8f1fd; --blue-line:#d4e4f9; --red:#e5484d; --red-light:#fdecec; --bg:#f6f9fd; --card:#fff; --ink:#17222e; --muted:#64748b; }
   * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:84px; }
-  header { background:var(--navy); color:#fff; padding:16px 20px; position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; }
-  header h1 { font-size:20px; } header h1 span { color:var(--gold); }
+  header { background:#fff; color:var(--ink); padding:16px 20px; position:sticky; top:0; z-index:10; display:flex; align-items:center; justify-content:space-between; border-bottom:1px solid var(--blue-line); }
+  header h1 { font-size:20px; color:var(--blue-dark); } header h1 span { color:var(--red); }
   main { max-width:520px; margin:0 auto; padding:16px; }
-  .card { background:var(--card); border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.07); }
-  .truck { display:flex; justify-content:space-between; align-items:center; cursor:pointer; }
+  .card { background:var(--card); border-radius:16px; padding:16px; margin-bottom:12px; box-shadow:0 1px 2px rgba(23,58,110,.06), 0 4px 14px rgba(23,58,110,.05); border:1px solid #eaf1fa; }
+  .truck { display:flex; justify-content:space-between; align-items:center; cursor:pointer; transition:transform .1s; }
   .truck:active { transform:scale(.99); }
-  .pill { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; white-space:nowrap; }
-  .pill.open { background:#e2f6ec; color:var(--green); } .pill.closed { background:#fdeaea; color:var(--red); }
-  .pill.placed { background:#fff3d6; color:#8a6d00; } .pill.confirmed { background:#e0ecff; color:#1d4ed8; }
-  .pill.ready { background:#e2f6ec; color:var(--green); } .pill.picked_up,.pill.cancelled { background:#eee; color:var(--muted); }
+  .pill { font-size:12px; font-weight:700; padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  .pill.open { background:var(--blue-light); color:var(--blue-dark); } .pill.closed { background:var(--red-light); color:var(--red); }
+  .pill.soon { background:#eef2f7; color:#4a5768; }
+  .pill.placed { background:#eef2f7; color:var(--muted); } .pill.confirmed { background:var(--blue-light); color:var(--blue-dark); }
+  .pill.ready { background:var(--red-light); color:var(--red); } .pill.picked_up,.pill.cancelled { background:#eef2f7; color:var(--muted); }
   .muted { color:var(--muted); font-size:13px; }
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
-  .item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #f0f1f4; }
+  .item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #eef3fa; }
   .item:last-child { border-bottom:none; }
   .qty { display:flex; align-items:center; gap:10px; }
-  .qty button { width:32px; height:32px; border-radius:8px; border:1px solid #d8dce3; background:#fff; font-size:18px; font-weight:700; color:var(--navy); }
+  .qty button { width:32px; height:32px; border-radius:9px; border:1px solid var(--blue-line); background:var(--blue-light); font-size:18px; font-weight:700; color:var(--blue-dark); }
   .qty button:disabled { opacity:.35; cursor:not-allowed; }
   .truck.unorderable { opacity:.6; }
-  .banner.warn { background:#fdeaea; border-color:#f6c6c6; color:#8a2626; }
-  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; transition:transform .1s; }
+  .banner.warn { background:var(--red-light); border-color:#f6c8ca; color:#b53338; }
+  button.primary { width:100%; background:var(--blue); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; transition:transform .1s; box-shadow:0 3px 10px rgba(26,115,232,.25); }
   button.primary:disabled { opacity:.4; }
   button.primary:not(:disabled):active { transform:scale(.97); }
-  button.link { background:none; border:none; color:var(--navy); font-weight:600; font-size:14px; cursor:pointer; padding:0 0 10px; }
-  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; transition:border-color .15s, box-shadow .15s; }
-  input:focus { outline:none; border-color:var(--navy); box-shadow:0 0 0 3px rgba(0,40,86,.12); }
+  button.link { background:none; border:none; color:var(--blue); font-weight:600; font-size:14px; cursor:pointer; padding:0 0 10px; }
+  input { width:100%; padding:12px; border:1px solid var(--blue-line); border-radius:10px; font-size:15px; margin-bottom:10px; background:#fff; transition:border-color .15s, box-shadow .15s; }
+  input:focus { outline:none; border-color:var(--blue); box-shadow:0 0 0 3px rgba(26,115,232,.15); }
   .qty button:not(:disabled):active { transform:scale(.92); }
   .toast { position:fixed; left:50%; bottom:94px; transform:translateX(-50%) translateY(12px); background:var(--ink); color:#fff; padding:12px 18px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.2); opacity:0; transition:opacity .2s, transform .2s; z-index:100; max-width:86%; text-align:center; pointer-events:none; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.error { background:var(--red); }
-  nav { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e6e8ec; display:flex; }
+  nav { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid var(--blue-line); display:flex; }
   nav button { flex:1; padding:12px 0 18px; border:none; background:none; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; }
-  nav button.active { color:var(--navy); }
+  nav button.active { color:var(--blue); }
   nav button .ico { display:block; font-size:20px; margin-bottom:2px; }
-  .countdown { font-size:40px; font-weight:800; color:var(--navy); text-align:center; margin:6px 0; font-variant-numeric:tabular-nums; }
-  .code { font-size:28px; font-weight:800; letter-spacing:6px; color:var(--gold); background:var(--navy); border-radius:10px; text-align:center; padding:10px; margin-top:8px; }
-  .banner { background:#fff8e1; border:1px solid #ffe9a8; color:#7a5d00; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
+  .countdown { font-size:40px; font-weight:800; color:var(--blue); text-align:center; margin:6px 0; font-variant-numeric:tabular-nums; }
+  .code { font-size:28px; font-weight:800; letter-spacing:6px; color:#fff; background:var(--blue); border-radius:12px; text-align:center; padding:10px; margin-top:8px; }
+  .banner { background:var(--blue-light); border:1px solid var(--blue-line); color:#1c5aa8; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
   .total { display:flex; justify-content:space-between; font-weight:700; font-size:16px; padding-top:10px; }
   .empty { text-align:center; color:var(--muted); padding:40px 0; }
 </style>
 </head>
 <body>
-<header><h1>🐾 Bobcat <span>Bites</span></h1><span class="muted" style="color:#9fb3cf">UC Merced</span></header>
+<header><h1>🐾 Bobcat <span>Bites</span></h1><span class="muted">UC Merced</span></header>
 <main id="view"></main>
 <nav>
   <button id="nav-trucks" class="active" onclick="go('trucks')"><span class="ico">🚚</span>Trucks</button>
@@ -203,14 +204,16 @@ function render() {
       state.trucks.length ? state.trucks.map((t) => `
         <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
           <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div></div>
-          <span class="pill ${isOrderable(t) ? "open" : "closed"}">${t.is_open ? (t.orders_paused ? "Paused" : "Open") : "Closed"}</span>
+          <span class="pill ${isOrderable(t) ? "open" : t.is_open ? "soon" : "closed"}">${isOrderable(t) ? "Open" : t.is_open ? "Back soon" : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
   if (state.screen === "menu") {
     const t = state.truck; const orderable = isOrderable(t);
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
       <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>` +
-      (orderable ? "" : `<div class="banner warn">🚫 ${t.orders_paused ? "This truck has paused new orders" : "This truck is currently closed"} — you can browse the menu but can't order right now.</div>`) +
+      (orderable ? "" : t.is_open
+        ? `<div class="banner">⏸️ Taking a quick break — back soon! Browse the menu now, ordering reopens shortly.</div>`
+        : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
       (state.menu.length ? state.menu.map((m) => `
         <div class="item">
@@ -244,7 +247,7 @@ function render() {
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
           ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div>` : ""}
           ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd}</div>` : ""}
-          ${o.status === "ready" ? `<div class="banner" style="background:#e2f6ec;border-color:#bfe8d2;color:#116b3f">🎉 Ready! Show this code at the window:</div>` : ""}
+          ${o.status === "ready" ? `<div class="banner warn" style="font-weight:700">🎉 Ready! Show this code at the window:</div>` : ""}
           ${o.status !== "cancelled" && o.status !== "picked_up" ? `<div class="code">${esc(o.pickup_code || "")}</div>` : ""}
         </div>`;
       }).join("") : `<div class="empty">No orders yet.<br>Hit the Trucks tab and grab something 🌯</div>`);
