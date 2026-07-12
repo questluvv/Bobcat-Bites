@@ -194,9 +194,61 @@ async function saveTruck() {
   toast(error ? error.message : "Saved ✓", error ? "error" : undefined); await loadVendor(); render();
 }
 
+// Update the vendor row; if the paused_until column hasn't been migrated yet,
+// retry without it so pausing still works (just without a student-facing timer).
+async function updateVendor(patch) {
+  let { error } = await sb.from("vendors").update({ ...patch, updated_at: new Date().toISOString() }).eq("id", state.vendor.id);
+  if (error && /paused_until/.test(error.message) && "paused_until" in patch) {
+    const { paused_until, ...rest } = patch;
+    ({ error } = await sb.from("vendors").update({ ...rest, updated_at: new Date().toISOString() }).eq("id", state.vendor.id));
+  }
+  return error;
+}
+
 async function toggleVendor(field) {
-  const { error } = await sb.from("vendors").update({ [field]: !state.vendor[field], updated_at: new Date().toISOString() }).eq("id", state.vendor.id);
+  if (field === "orders_paused" && !state.vendor.orders_paused) return openBreakSheet();
+  const patch = { [field]: !state.vendor[field] };
+  if (field === "orders_paused") patch.paused_until = null;
+  if (field === "is_open" && state.vendor.is_open) { patch.orders_paused = false; patch.paused_until = null; }
+  const error = await updateVendor(patch);
   if (error) return toast(error.message, "error");
+  await loadVendor(); render();
+}
+
+// ---------- break timer ----------
+let breakChoice = null;
+function openBreakSheet() {
+  breakChoice = null;
+  const chips = [10, 15, 20, 30, 45, 60, 90, 120].map((m) =>
+    `<button class="eta-chip" id="brk-${m}" onclick="pickBreak(${m})">${m}<small>min</small></button>`).join("");
+  const el = document.createElement("div");
+  el.className = "backdrop"; el.id = "breakSheet";
+  el.onclick = (e) => { if (e.target === el) closeBreak(); };
+  el.innerHTML = `<div class="sheet">
+      <h3>⏸️ How long's the break?</h3>
+      <div class="muted">Students see "Back soon" with a countdown, and orders reopen on their own when it ends.</div>
+      <div class="eta-grid">${chips}</div>
+      <button class="primary" id="brkGo" disabled onclick="startBreak(breakChoice)">Pick a length</button>
+      <div style="height:8px"></div>
+      <button class="ghost" onclick="startBreak(null)">Pause without a timer</button>
+      <div style="height:8px"></div>
+      <button class="ghost" onclick="closeBreak()">Cancel</button>
+    </div>`;
+  document.body.appendChild(el);
+}
+function pickBreak(m) {
+  breakChoice = m;
+  document.querySelectorAll("#breakSheet .eta-chip").forEach((c) => c.classList.remove("sel"));
+  $("brk-" + m).classList.add("sel");
+  const go = $("brkGo"); go.disabled = false; go.textContent = `Pause — back in ${m} min`;
+}
+function closeBreak() { $("breakSheet")?.remove(); breakChoice = null; }
+async function startBreak(min) {
+  if (min === undefined || (min !== null && !(min >= 1))) return;
+  closeBreak();
+  const error = await updateVendor({ orders_paused: true, paused_until: min ? new Date(Date.now() + min * 60000).toISOString() : null });
+  if (error) return toast(error.message, "error");
+  toast(min ? `⏸️ Paused — back in ${min} min` : "⏸️ Orders paused");
   await loadVendor(); render();
 }
 
@@ -226,6 +278,11 @@ async function loadOrders() {
   state.orders = data || [];
   const n = state.orders.filter((o) => o.status === "placed").length;
   $("orderBadge").innerHTML = n ? `<span class="badge">${n}</span>` : "";
+  // Break timer expired → come off pause automatically
+  if (state.vendor?.orders_paused && state.vendor.paused_until && new Date(state.vendor.paused_until) <= new Date()) {
+    const error = await updateVendor({ orders_paused: false, paused_until: null });
+    if (!error) { await loadVendor(); toast("☀️ Break's over — you're taking orders again"); }
+  }
   if (state.screen === "orders") render();
 }
 
@@ -312,6 +369,7 @@ function render() {
     const groups = { placed: "🆕 New — confirm with an ETA", confirmed: "👨‍🍳 In the kitchen", ready: "✅ Ready — waiting for pickup" };
     v.innerHTML = (vd.status !== "approved" ? `<div class="banner">Your truck is <b>${vd.status}</b> — students can't see you until an admin approves it.</div>` : "") +
       (!vd.is_open ? `<div class="banner">You're marked <b>closed</b> — open up in My Truck to receive orders.</div>` : "") +
+      (vd.is_open && vd.orders_paused ? `<div class="banner">⏸️ On break — students see "Back soon"${vd.paused_until ? ` and orders reopen ~${new Date(vd.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : ""}. Resume early in My Truck.</div>` : "") +
       Object.entries(groups).map(([st, label]) => {
         const list = state.orders.filter((o) => o.status === st);
         return `<h2>${label}</h2>` + (list.length ? list.map((o) => `
@@ -359,7 +417,7 @@ function render() {
       <div class="card">
         <div class="row"><h2>${esc(vd.name)}</h2><span class="pill ${vd.status}">${vd.status}</span></div>
         <div class="switch"><div><b>Open for orders</b><div class="muted">Students see you as open</div></div><button class="toggle ${vd.is_open ? "on" : ""}" onclick="toggleVendor('is_open')"></button></div>
-        <div class="switch"><div><b>Pause new orders</b><div class="muted">Stay open, stop the queue</div></div><button class="toggle ${vd.orders_paused ? "on" : ""}" onclick="toggleVendor('orders_paused')"></button></div>
+        <div class="switch"><div><b>Pause new orders</b><div class="muted">${vd.orders_paused ? (vd.paused_until ? `⏸️ On break — reopens ~${new Date(vd.paused_until).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}` : "⏸️ On break — no timer set") : "Take a break, stop the queue"}</div></div><button class="toggle ${vd.orders_paused ? "on" : ""}" onclick="toggleVendor('orders_paused')"></button></div>
       </div>
       <div class="card"><h3 style="margin-bottom:10px">Truck info</h3>
         <input id="t_name" value="${esc(vd.name)}" placeholder="Truck name">
