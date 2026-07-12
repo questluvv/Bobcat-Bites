@@ -1,0 +1,86 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bobcat Bites — Admin</title>
+<style>
+  :root { --navy:#002856; --gold:#DAA900; --green:#1a9c5d; --red:#c73838; --muted:#6b7484; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:#f6f7f9; color:#1a2233; }
+  header { background:var(--navy); color:#fff; padding:14px 18px; } header h1 { font-size:18px; } header span { color:var(--gold); }
+  main { max-width:560px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.07); }
+  input { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; }
+  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-weight:700; font-size:15px; cursor:pointer; }
+  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; }
+  .approve { background:#e2f6ec; color:var(--green); } .suspend { background:#fdeaea; color:var(--red); } .pend { background:#fff3d6; color:#8a6d00; }
+  .pill { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; }
+  .pill.pending { background:#fff3d6; color:#8a6d00; } .pill.approved { background:#e2f6ec; color:var(--green); } .pill.suspended { background:#fdeaea; color:var(--red); }
+  .muted { color:var(--muted); font-size:13px; }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; flex-wrap:wrap; }
+  h3 { font-size:15px; }
+</style>
+</head>
+<body>
+<header><h1>🛡️ Bobcat <span>Bites</span> · Admin</h1></header>
+<main id="view"></main>
+<script>
+const API = "https://gqwihtfjmxqxkzssnsrk.supabase.co/functions/v1/api";
+const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
+let pin = sessionStorage.getItem("bb_admin_pin") || "";
+let vendors = [];
+const $ = (id) => document.getElementById(id);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+
+async function api(payload) {
+  const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+
+async function unlock() {
+  pin = $("pin").value.trim();
+  try { await load(); sessionStorage.setItem("bb_admin_pin", pin); }
+  catch (e) { alert(e.message); pin = ""; }
+}
+async function load() {
+  const res = await api({ action: "admin_list", pin });
+  vendors = res.vendors; render();
+}
+async function setStatus(id, status) {
+  await api({ action: "admin_set_status", pin, vendor_id: id, status });
+  load();
+}
+
+function render() {
+  const v = $("view");
+  if (!pin || !vendors.length && !vendors._loaded) { /* fallthrough below handles */ }
+  if (!pin) {
+    v.innerHTML = `<div class="card"><h3 style="margin-bottom:10px">Enter admin PIN</h3>
+      <input id="pin" type="password" inputmode="numeric" placeholder="PIN">
+      <button class="primary" onclick="unlock()">Unlock</button></div>`;
+    return;
+  }
+  const pending = vendors.filter((x) => x.status === "pending");
+  const rest = vendors.filter((x) => x.status !== "pending");
+  const card = (x) => `<div class="card">
+      <div class="row"><h3>${esc(x.name)}</h3><span class="pill ${x.status}">${x.status}</span></div>
+      <div class="muted">${esc(x.description || "")}</div>
+      <div class="muted">📍 ${esc(x.default_location || "—")} · 📱 ${esc(x.contact_phone || "—")} · ✉️ ${esc(x.contact_email || "—")}</div>
+      <div class="muted">Signed up ${new Date(x.created_at).toLocaleDateString()}</div>
+      <div class="row" style="margin-top:10px">
+        ${x.status !== "approved" ? `<button class="small approve" onclick="setStatus('${x.id}','approved')">Approve ✓</button>` : ""}
+        ${x.status !== "suspended" ? `<button class="small suspend" onclick="setStatus('${x.id}','suspended')">Suspend</button>` : ""}
+        ${x.status !== "pending" ? `<button class="small pend" onclick="setStatus('${x.id}','pending')">Set pending</button>` : ""}
+      </div></div>`;
+  v.innerHTML = `<div class="row" style="margin-bottom:10px"><h3>Vendors (${vendors.length})</h3><button class="small pend" onclick="load()">↻ Refresh</button></div>
+    ${pending.length ? `<h3 style="margin:6px 0">⏳ Awaiting approval (${pending.length})</h3>` + pending.map(card).join("") : ""}
+    ${rest.map(card).join("") || '<div class="card muted">No vendors yet.</div>'}`;
+}
+if (pin) load().catch(() => { pin = ""; render(); });
+render();
+</script>
+</body>
+</html>

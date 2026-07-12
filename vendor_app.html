@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+<title>Bobcat Bites — Vendor</title>
+<link rel="manifest" href="manifest-vendor.webmanifest">
+<meta name="theme-color" content="#002856">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BB Vendor">
+<link rel="apple-touch-icon" href="icon-vendor-192.png">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+<style>
+  :root { --navy:#002856; --gold:#DAA900; --bg:#f6f7f9; --ink:#1a2233; --muted:#6b7484; --green:#1a9c5d; --red:#c73838; }
+  * { box-sizing:border-box; margin:0; }
+  body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:84px; }
+  header { background:var(--navy); color:#fff; padding:14px 18px; position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; }
+  header h1 { font-size:18px; } header h1 span { color:var(--gold); }
+  main { max-width:520px; margin:0 auto; padding:16px; }
+  .card { background:#fff; border-radius:14px; padding:16px; margin-bottom:12px; box-shadow:0 1px 3px rgba(0,0,0,.07); }
+  h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
+  .muted { color:var(--muted); font-size:13px; }
+  input, textarea { width:100%; padding:12px; border:1px solid #d8dce3; border-radius:10px; font-size:15px; margin-bottom:10px; font-family:inherit; }
+  button.primary { width:100%; background:var(--navy); color:#fff; border:none; border-radius:12px; padding:14px; font-size:15px; font-weight:700; cursor:pointer; }
+  button.primary:disabled { opacity:.4; }
+  button.ghost { width:100%; background:#fff; color:var(--navy); border:1.5px solid var(--navy); border-radius:12px; padding:12px; font-size:14px; font-weight:700; cursor:pointer; }
+  button.small { padding:8px 14px; border-radius:9px; border:none; font-weight:700; font-size:13px; cursor:pointer; }
+  .b-confirm { background:#e0ecff; color:#1d4ed8; } .b-ready { background:#e2f6ec; color:var(--green); }
+  .b-done { background:#eee; color:#444; } .b-danger { background:#fdeaea; color:var(--red); }
+  .pill { font-size:12px; font-weight:600; padding:3px 10px; border-radius:99px; white-space:nowrap; }
+  .pill.pending { background:#fff3d6; color:#8a6d00; } .pill.approved { background:#e2f6ec; color:var(--green); }
+  .pill.suspended { background:#fdeaea; color:var(--red); }
+  .pill.placed { background:#fff3d6; color:#8a6d00; } .pill.confirmed { background:#e0ecff; color:#1d4ed8; }
+  .pill.ready { background:#e2f6ec; color:var(--green); }
+  .row { display:flex; justify-content:space-between; align-items:center; gap:8px; }
+  .item { padding:10px 0; border-bottom:1px solid #f0f1f4; } .item:last-child { border-bottom:none; }
+  nav { position:fixed; bottom:0; left:0; right:0; background:#fff; border-top:1px solid #e6e8ec; display:flex; }
+  nav button { flex:1; padding:12px 0 18px; border:none; background:none; font-size:12px; font-weight:600; color:var(--muted); cursor:pointer; }
+  nav button.active { color:var(--navy); }
+  nav button .ico { display:block; font-size:20px; margin-bottom:2px; }
+  .banner { background:#fff8e1; border:1px solid #ffe9a8; color:#7a5d00; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
+  .switch { display:flex; justify-content:space-between; align-items:center; padding:12px 0; border-bottom:1px solid #f0f1f4; }
+  .toggle { width:52px; height:30px; border-radius:99px; border:none; cursor:pointer; position:relative; background:#d8dce3; transition:.15s; }
+  .toggle.on { background:var(--green); }
+  .toggle::after { content:""; position:absolute; top:3px; left:3px; width:24px; height:24px; border-radius:50%; background:#fff; transition:.15s; }
+  .toggle.on::after { left:25px; }
+  .code { font-weight:800; letter-spacing:3px; color:var(--gold); background:var(--navy); border-radius:8px; padding:2px 10px; }
+  .empty { text-align:center; color:var(--muted); padding:30px 0; }
+  .badge { background:var(--red); color:#fff; border-radius:99px; font-size:11px; padding:1px 7px; margin-left:4px; }
+</style>
+</head>
+<body>
+<header><h1>🚚 Bobcat <span>Bites</span> · Vendor</h1><button class="small b-done" id="logoutBtn" style="display:none" onclick="logout()">Log out</button></header>
+<main id="view"></main>
+<nav id="tabs" style="display:none">
+  <button id="nav-orders" class="active" onclick="go('orders')"><span class="ico">🔔</span>Orders<span id="orderBadge"></span></button>
+  <button id="nav-menu" onclick="go('menu')"><span class="ico">🍔</span>Menu</button>
+  <button id="nav-truck" onclick="go('truck')"><span class="ico">⚙️</span>My Truck</button>
+</nav>
+
+<script>
+const SUPABASE_URL = "https://gqwihtfjmxqxkzssnsrk.supabase.co";
+const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
+const sb = supabase.createClient(SUPABASE_URL, KEY);
+
+let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null };
+const $ = (id) => document.getElementById(id);
+const money = (c) => "$" + (c / 100).toFixed(2);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  state.user = session?.user || null;
+  if (state.user) await loadVendor();
+  render();
+}
+sb.auth.onAuthStateChange((_e, session) => { state.user = session?.user || null; if (state.user) loadVendor().then(render); else render(); });
+
+async function loadVendor() {
+  const { data } = await sb.from("vendors").select("*").eq("owner_user_id", state.user.id).maybeSingle();
+  state.vendor = data || null;
+}
+
+function readCreds() {
+  const email = $("email").value.trim(), pw = $("pw").value;
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { alert("Type your email in the Email box first."); return null; }
+  if (pw.length < 6) { alert("Password needs at least 6 characters."); return null; }
+  return { email, pw };
+}
+async function signup() {
+  const c = readCreds(); if (!c) return;
+  try {
+    // Server-side signup: account is created pre-confirmed (no confirmation email needed)
+    const r = await fetch(SUPABASE_URL + "/functions/v1/api", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY },
+      body: JSON.stringify({ action: "vendor_signup", email: c.email, password: c.pw }),
+    });
+    const j = await r.json().catch(() => ({}));
+    if (!r.ok) return alert(j.error || "Signup failed");
+    const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
+    if (error) return alert("Account created — now log in: " + error.message);
+  } catch (e) { alert("Signup failed: " + e.message); }
+}
+async function login() {
+  const c = readCreds(); if (!c) return;
+  const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
+  if (error) return alert(error.message);
+}
+async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
+
+async function createTruck() {
+  const rec = {
+    owner_user_id: state.user.id,
+    name: $("t_name").value.trim(),
+    description: $("t_desc").value.trim(),
+    contact_phone: $("t_phone").value.trim(),
+    contact_email: state.user.email,
+    default_location: $("t_loc").value.trim(),
+  };
+  if (!rec.name) return alert("Truck name required");
+  const { error } = await sb.from("vendors").insert(rec);
+  if (error) return alert(error.message);
+  await loadVendor(); render();
+}
+
+async function saveTruck() {
+  const { error } = await sb.from("vendors").update({
+    name: $("t_name").value.trim(), description: $("t_desc").value.trim(),
+    contact_phone: $("t_phone").value.trim(), default_location: $("t_loc").value.trim(),
+    updated_at: new Date().toISOString(),
+  }).eq("id", state.vendor.id);
+  alert(error ? error.message : "Saved ✓"); await loadVendor(); render();
+}
+
+async function toggleVendor(field) {
+  const { error } = await sb.from("vendors").update({ [field]: !state.vendor[field], updated_at: new Date().toISOString() }).eq("id", state.vendor.id);
+  if (error) return alert(error.message);
+  await loadVendor(); render();
+}
+
+// ---------- menu ----------
+async function loadMenu() {
+  const { data } = await sb.from("menu_items").select("*").eq("vendor_id", state.vendor.id).order("created_at");
+  state.menu = data || []; render();
+}
+async function addItem() {
+  const name = $("m_name").value.trim(), price = Math.round(parseFloat($("m_price").value) * 100), prep = parseInt($("m_prep").value) || 10;
+  if (!name || !(price >= 0)) return alert("Name and a valid price required");
+  const { error } = await sb.from("menu_items").insert({ vendor_id: state.vendor.id, name, description: $("m_desc").value.trim(), price_cents: price, default_prep_minutes: prep });
+  if (error) return alert(error.message);
+  loadMenu();
+}
+async function toggleItem(id, val) { await sb.from("menu_items").update({ is_available: val, updated_at: new Date().toISOString() }).eq("id", id); loadMenu(); }
+async function deleteItem(id) { if (!confirm("Delete this item?")) return; const { error } = await sb.from("menu_items").delete().eq("id", id); if (error) alert("Can't delete (already ordered?) — mark unavailable instead."); loadMenu(); }
+
+// ---------- orders ----------
+async function loadOrders() {
+  const { data } = await sb.from("orders")
+    .select("id,status,eta_minutes,pickup_code,total_cents,created_at,confirmed_at,students(full_name,phone),order_items(item_name_snapshot,quantity,notes)")
+    .eq("vendor_id", state.vendor.id)
+    .in("status", ["placed", "confirmed", "ready"])
+    .order("created_at");
+  state.orders = data || [];
+  const n = state.orders.filter((o) => o.status === "placed").length;
+  $("orderBadge").innerHTML = n ? `<span class="badge">${n}</span>` : "";
+  if (state.screen === "orders") render();
+}
+
+async function setOrder(id, status, extra = {}) {
+  const patch = { status, updated_at: new Date().toISOString(), ...extra };
+  if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
+  if (status === "ready") patch.ready_at = new Date().toISOString();
+  if (status === "picked_up") patch.picked_up_at = new Date().toISOString();
+  if (status === "cancelled") patch.cancelled_at = new Date().toISOString();
+  const { error } = await sb.from("orders").update(patch).eq("id", id);
+  if (error) return alert(error.message);
+  await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
+  loadOrders();
+}
+function confirmOrder(id) {
+  const eta = parseInt(prompt("Prep time in minutes?", "12"));
+  if (!eta || eta < 1 || eta > 120) return;
+  setOrder(id, "confirmed", { eta_minutes: eta });
+}
+
+function go(screen) {
+  state.screen = screen;
+  document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
+  $("nav-" + screen).classList.add("active");
+  if (screen === "menu") loadMenu();
+  render();
+}
+
+function render() {
+  const v = $("view");
+  $("logoutBtn").style.display = state.user ? "" : "none";
+  $("tabs").style.display = state.user && state.vendor ? "flex" : "none";
+  clearInterval(state.pollTimer);
+
+  if (!state.user) {
+    v.innerHTML = `<div class="card"><h2>Truck owner sign in</h2>
+      <input id="email" type="email" placeholder="Email" autocomplete="username">
+      <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password">
+      <button class="primary" onclick="login()">Log in</button>
+      <div style="height:8px"></div>
+      <button class="ghost" onclick="signup()">Create account</button>
+      <p class="muted" style="margin-top:10px">New here? Fill in email + password above, then hit Create account — you'll be logged in instantly.</p></div>`;
+    return;
+  }
+  if (!state.vendor) {
+    v.innerHTML = `<div class="card"><h2>Register your truck</h2>
+      <input id="t_name" placeholder="Truck name *">
+      <textarea id="t_desc" rows="2" placeholder="Short description (cuisine, favorites)"></textarea>
+      <input id="t_phone" placeholder="Contact phone">
+      <input id="t_loc" placeholder="Usual campus spot (e.g. Scholars Lane)">
+      <button class="primary" onclick="createTruck()">Submit for approval</button></div>`;
+    return;
+  }
+
+  const vd = state.vendor;
+  if (state.screen === "orders") {
+    loadOrdersOnce();
+    state.pollTimer = setInterval(loadOrders, 8000);
+    const groups = { placed: "🆕 New — confirm with an ETA", confirmed: "👨‍🍳 In the kitchen", ready: "✅ Ready — waiting for pickup" };
+    v.innerHTML = (vd.status !== "approved" ? `<div class="banner">Your truck is <b>${vd.status}</b> — students can't see you until an admin approves it.</div>` : "") +
+      (!vd.is_open ? `<div class="banner">You're marked <b>closed</b> — open up in My Truck to receive orders.</div>` : "") +
+      Object.entries(groups).map(([st, label]) => {
+        const list = state.orders.filter((o) => o.status === st);
+        return `<h2>${label}</h2>` + (list.length ? list.map((o) => `
+          <div class="card">
+            <div class="row"><h3>${esc(o.students?.full_name || "Student")} · ${money(o.total_cents)}</h3><span class="code">${esc(o.pickup_code || "")}</span></div>
+            <div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${o.students?.phone ? " · 📱 " + esc(o.students.phone) : ""}${o.eta_minutes ? " · ETA " + o.eta_minutes + " min" : ""}</div>
+            ${(o.order_items || []).map((i) => `<div class="item"><b>${i.quantity}×</b> ${esc(i.item_name_snapshot)}${i.notes ? `<div class="muted">📝 ${esc(i.notes)}</div>` : ""}</div>`).join("")}
+            <div class="row" style="margin-top:10px">
+              ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
+              ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button>` : ""}
+              ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button>` : ""}
+            </div>
+          </div>`).join("") : `<div class="empty">Nothing here</div>`);
+      }).join("");
+  }
+
+  if (state.screen === "menu") {
+    v.innerHTML = `<h2>Menu</h2>` +
+      (state.menu.map((m) => `
+        <div class="card row">
+          <div style="flex:1"><b>${esc(m.name)}</b> · ${money(m.price_cents)}<div class="muted">${esc(m.description || "")} · ~${m.default_prep_minutes} min</div></div>
+          <button class="toggle ${m.is_available ? "on" : ""}" title="Available?" onclick="toggleItem('${m.id}', ${!m.is_available})"></button>
+          <button class="small b-danger" onclick="deleteItem('${m.id}')">✕</button>
+        </div>`).join("") || `<div class="empty">No items yet</div>`) +
+      `<div class="card"><h3 style="margin-bottom:10px">Add item</h3>
+        <input id="m_name" placeholder="Item name *">
+        <input id="m_desc" placeholder="Description">
+        <div class="row"><input id="m_price" type="number" step="0.01" min="0" placeholder="Price ($) *"><input id="m_prep" type="number" min="1" placeholder="Prep min (10)"></div>
+        <button class="primary" onclick="addItem()">Add to menu</button></div>`;
+  }
+
+  if (state.screen === "truck") {
+    v.innerHTML = `<div class="card">
+        <div class="row"><h2>${esc(vd.name)}</h2><span class="pill ${vd.status}">${vd.status}</span></div>
+        <div class="switch"><div><b>Open for orders</b><div class="muted">Students see you as open</div></div><button class="toggle ${vd.is_open ? "on" : ""}" onclick="toggleVendor('is_open')"></button></div>
+        <div class="switch"><div><b>Pause new orders</b><div class="muted">Stay open, stop the queue</div></div><button class="toggle ${vd.orders_paused ? "on" : ""}" onclick="toggleVendor('orders_paused')"></button></div>
+      </div>
+      <div class="card"><h3 style="margin-bottom:10px">Truck info</h3>
+        <input id="t_name" value="${esc(vd.name)}" placeholder="Truck name">
+        <textarea id="t_desc" rows="2" placeholder="Description">${esc(vd.description || "")}</textarea>
+        <input id="t_phone" value="${esc(vd.contact_phone || "")}" placeholder="Contact phone">
+        <input id="t_loc" value="${esc(vd.default_location || "")}" placeholder="Usual campus spot">
+        <button class="primary" onclick="saveTruck()">Save changes</button></div>`;
+  }
+}
+let loadedOnce = false;
+function loadOrdersOnce() { if (!loadedOnce) { loadedOnce = true; loadOrders(); } }
+init();
+
+// PWA: register service worker (only works over https — i.e. once hosted on Netlify)
+if ("serviceWorker" in navigator && location.protocol === "https:") {
+  navigator.serviceWorker.register("sw.js").catch(() => {});
+}
