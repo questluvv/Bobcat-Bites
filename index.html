@@ -25,7 +25,7 @@
   .pill.open { background:var(--blue-light); color:var(--blue-dark); } .pill.closed { background:var(--red-light); color:var(--red); }
   .pill.soon { background:#eef2f7; color:#4a5768; }
   .pill.placed { background:#eef2f7; color:var(--muted); } .pill.confirmed { background:var(--blue-light); color:var(--blue-dark); }
-  .pill.ready { background:var(--red-light); color:var(--red); } .pill.picked_up,.pill.cancelled { background:#eef2f7; color:var(--muted); }
+  .pill.ready { background:var(--red-light); color:var(--red); } .pill.picked_up,.pill.cancelled,.pill.pending_payment { background:#eef2f7; color:var(--muted); }
   .muted { color:var(--muted); font-size:13px; }
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
   .item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #eef3fa; }
@@ -104,6 +104,21 @@ async function api(payload) {
   return j;
 }
 
+// Card payments go live automatically once the `stripe` edge function is
+// deployed with keys — until then this probe fails closed to demo pay.
+let stripeEnabled = null;
+async function stripeApi(payload) {
+  const r = await fetch(SUPABASE_URL + "/functions/v1/stripe", { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
+  const j = await r.json().catch(() => ({ error: "Bad response" }));
+  if (!r.ok) { const e = new Error(j.error || "Request failed"); e.code = j.code; throw e; }
+  return j;
+}
+async function probeStripe() {
+  try { stripeEnabled = !!(await stripeApi({ action: "status" })).enabled; }
+  catch (e) { stripeEnabled = false; }
+  if (state.screen === "checkout") render();
+}
+
 function go(screen) {
   state.screen = screen;
   document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
@@ -129,13 +144,25 @@ async function notify(title, body) {
   } catch (e) {}
   try { new Notification(title, opts); } catch (e) {}
 }
+const nearNotified = new Set();
 function notifyOrderChanges(prevOrders, freshOrders) {
   freshOrders.forEach((o) => {
     const prev = prevOrders.find((p) => p.id === o.id);
-    if (!prev || prev.status === o.status) return;
     const truck = o.vendors?.name || "The truck";
-    if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
-    if (o.status === "ready") notify("Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+    if (prev && prev.status !== o.status) {
+      if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
+      if (o.status === "ready") notify("Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+      return;
+    }
+    // Heads-up inside the last 3 minutes of the countdown so the student
+    // starts walking before the food is sitting on the counter.
+    if (o.status === "confirmed" && prev?.status === "confirmed" && !nearNotified.has(o.id)) {
+      const cd = countdownFor(o);
+      if (cd && cd.left > 0 && cd.left <= 3 * 60000) {
+        nearNotified.add(o.id);
+        notify("Almost ready 🐾", `${truck} — about ${Math.max(1, Math.ceil(cd.left / 60000))} min left. Time to head over!`);
+      }
+    }
   });
 }
 let orderPollTimer = null;
@@ -184,14 +211,25 @@ async function placeOrder() {
   if (!isOrderable(state.truck)) { toast("This truck isn't accepting orders right now.", "error"); go("trucks"); return; }
   if (!$("s_name").value.trim()) { toast("Enter your name so the truck knows who to make it for.", "error"); $("s_name").focus(); return; }
   const btn = $("placeBtn"); btn.disabled = true; btn.textContent = "Placing…";
+  const details = {
+    device_key: deviceKey,
+    student_name: $("s_name").value.trim(), phone: $("s_phone").value.trim(),
+    vendor_id: state.truck.id,
+    items: Object.entries(state.cart).map(([menu_item_id, quantity]) => ({ menu_item_id, quantity })),
+  };
+  localStorage.setItem("bb_name", details.student_name);
+  if (stripeEnabled) {
+    try {
+      const res = await stripeApi({ action: "create_checkout", ...details });
+      location.href = res.url; // off to Stripe Checkout; webhook flips the order to "placed"
+      return;
+    } catch (e) {
+      if (e.code !== "no_card_payments") { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Pay with card"; return; }
+      // truck hasn't finished Stripe onboarding — fall through to demo pay
+    }
+  }
   try {
-    const res = await api({
-      action: "place_order", device_key: deviceKey,
-      student_name: $("s_name").value.trim(), phone: $("s_phone").value.trim(),
-      vendor_id: state.truck.id,
-      items: Object.entries(state.cart).map(([menu_item_id, quantity]) => ({ menu_item_id, quantity })),
-    });
-    localStorage.setItem("bb_name", $("s_name").value.trim());
+    const res = await api({ action: "place_order", ...details });
     requestNotifyPermission();
     go("orders");
     toast("Order placed! Code " + res.pickup_code);
@@ -263,8 +301,8 @@ function render() {
       <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">
         <input id="s_phone" type="tel" placeholder="Phone (optional)">
-        <div class="banner">Demo payment — no card charged. Stripe checkout replaces this button later.</div>
-        <button class="primary" type="submit" id="placeBtn">Place order — demo pay</button>
+        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">Demo payment — no card charged. Stripe checkout replaces this button later.</div>`}
+        <button class="primary" type="submit" id="placeBtn">${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Place order — demo pay"}</button>
       </form>`;
   }
   if (state.screen === "orders") {
@@ -279,15 +317,30 @@ function render() {
           ${(o.order_items || []).map((i) => `<div class="item"><span>${i.quantity}× ${esc(i.item_name_snapshot)}</span><span>${money(i.unit_price_cents * i.quantity)}</span></div>`).join("")}
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
           ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div>` : ""}
+          ${o.status === "pending_payment" ? `<div class="banner">💳 Finishing payment… this updates on its own once Stripe confirms.</div>` : ""}
           ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd.text}</div><div class="muted" style="text-align:center;margin-bottom:6px">${etaMotto(cd.left)}</div>` : ""}
           ${o.status === "ready" ? `<div class="banner warn" style="font-weight:700">🎉 Ready! Show this code at the window:</div>` : ""}
-          ${o.status !== "cancelled" && o.status !== "picked_up" ? `<div class="code">${esc(o.pickup_code || "")}</div>` : ""}
+          ${o.status !== "cancelled" && o.status !== "picked_up" && o.status !== "pending_payment" ? `<div class="code">${esc(o.pickup_code || "")}</div>` : ""}
         </div>`;
       }).join("") : `<div class="empty">No orders yet.<br>Hit the Trucks tab and grab something 🌯</div>`);
   }
 }
-go("trucks");
+// Coming back from Stripe Checkout?
+const backFromPay = new URLSearchParams(location.search);
+if (backFromPay.has("paid")) {
+  history.replaceState(null, "", location.pathname);
+  go("orders");
+  requestNotifyPermission();
+  toast("💳 Payment received — your order is on its way to the truck!");
+} else if (backFromPay.has("pay_cancelled")) {
+  history.replaceState(null, "", location.pathname);
+  go("trucks");
+  toast("Payment cancelled — no order was placed.", "error");
+} else {
+  go("trucks");
+}
 startOrderPolling();
+probeStripe();
 
 // PWA: register service worker (only works over https — i.e. once hosted on Netlify)
 if ("serviceWorker" in navigator && location.protocol === "https:") {

@@ -169,6 +169,38 @@ async function enableAlerts() {
   } catch (e) { alert("Couldn't enable alerts: " + e.message); }
 }
 
+// ---------- payouts (Stripe Connect) ----------
+// The card stays hidden until the `stripe` edge function is deployed with keys.
+async function stripeApi(payload) {
+  const { data: { session } } = await sb.auth.getSession();
+  const r = await fetch(SUPABASE_URL + "/functions/v1/stripe", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + (session?.access_token || KEY) },
+    body: JSON.stringify(payload),
+  });
+  const j = await r.json().catch(() => ({ error: "Bad response" }));
+  if (!r.ok) throw new Error(j.error || "Request failed");
+  return j;
+}
+async function fillPayoutCard() {
+  try {
+    const { enabled } = await stripeApi({ action: "status" });
+    if (!enabled) return;
+    const st = await stripeApi({ action: "vendor_payout_status" });
+    const el = $("payoutCard"); // looked up after the awaits — render may have rebuilt the view
+    if (!el) return;
+    el.className = "card"; el.style.display = "";
+    el.innerHTML = st.charges_enabled
+      ? `<b>\ud83d\udcb8 Payouts: active</b><div class="muted">Card orders pay straight into your bank. Manage details any time via the button below.</div><div style="height:10px"></div><button class="ghost" onclick="openPayouts()">Payout settings</button>`
+      : st.connected
+      ? `<b>\ud83d\udcb8 Payouts: almost there</b><div class="muted" style="margin-bottom:10px">Stripe still needs a few details before card orders can pay out.</div><button class="primary" onclick="openPayouts()">Finish payout setup</button>`
+      : `<b>\ud83d\udcb8 Get paid by card</b><div class="muted" style="margin-bottom:10px">Set up payouts with Stripe (~10 min) \u2014 students pay in the app and sales land in your bank automatically.</div><button class="primary" onclick="openPayouts()">Set up payouts</button>`;
+  } catch (e) { /* function not deployed yet \u2014 keep hidden */ }
+}
+async function openPayouts() {
+  try { const { url } = await stripeApi({ action: "vendor_onboard" }); location.href = url; }
+  catch (e) { toast(e.message, "error"); }
+}
 
 async function createTruck() {
   const rec = {
@@ -413,7 +445,8 @@ function render() {
         ? `<b>\u{1F515} Alerts unavailable here</b><div class="muted">iPhone: Share \u2192 Add to Home Screen, then open the installed app and enable alerts. (Requires the https link, not a local file.)</div>`
         : `<b>\u{1F515} Order alerts: OFF</b><div class="muted" style="margin-bottom:10px">Get pinged the moment an order comes in \u2014 no need to keep this app open.</div><button class="primary" onclick="enableAlerts()">Enable order alerts</button>`;
     });
-    v.innerHTML = `<div class="card" id="alertsCard"><span class="muted">Checking alert status\u2026</span></div>
+    v.innerHTML = `<div id="payoutCard" style="display:none"></div>
+      <div class="card" id="alertsCard"><span class="muted">Checking alert status\u2026</span></div>
       <div class="card">
         <div class="row"><h2>${esc(vd.name)}</h2><span class="pill ${vd.status}">${vd.status}</span></div>
         <div class="switch"><div><b>Open for orders</b><div class="muted">Students see you as open</div></div><button class="toggle ${vd.is_open ? "on" : ""}" onclick="toggleVendor('is_open')"></button></div>
@@ -425,6 +458,7 @@ function render() {
         <input id="t_phone" value="${esc(vd.contact_phone || "")}" placeholder="Contact phone">
         <input id="t_loc" value="${esc(vd.default_location || "")}" placeholder="Usual campus spot">
         <button class="primary" onclick="saveTruck()">Save changes</button></div>`;
+    fillPayoutCard();
   }
 }
 let loadedOnce = false;
