@@ -199,7 +199,8 @@ async function openTruck(id) {
   clearInterval(state.tickTimer); clearInterval(state.truckTimer);
   state.tickTimer = setInterval(renderIfCounting, 1000);
   state.truckTimer = setInterval(refreshTruck, 10000);
-  const { data } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
+ const { data, error } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
+  if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
 }
 
