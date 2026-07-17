@@ -183,6 +183,7 @@ async function loadTrucks() {
     hasPausedUntil = false;
     ({ data, error } = await sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false }));
   }
+ if (error) { console.error("truck load failed:", error); toast("Couldn't load trucks — try again in a moment.", "error"); }
   state.trucks = error ? [] : data; state.trucksLoaded = true; render();
 }
 
