@@ -129,11 +129,78 @@ function go(screen) {
   render();
 }
 
-// Notifications: poll for order updates in the background (not just while on the
-// Orders tab) so a student browsing other trucks still gets pinged when the vendor
-// sets an ETA or marks their order ready.
-function requestNotifyPermission() {
-  if ("Notification" in window && Notification.permission === "default") Notification.requestPermission().then(render).catch(() => {});
+// Notifications: two channels.
+//  - Web push (below): server-sent, arrives with the app CLOSED. Primary.
+//  - notify() further down: fired locally by the poll loop, so it only works
+//    while a tab is open. Kept as the in-app path.
+// SMS is the third channel and is sent server-side regardless, because iOS
+// Safari refuses background push unless the PWA is installed to the home screen.
+const VAPID_PUBLIC_KEY = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
+const SUBSCRIBE_URL = SUPABASE_URL + "/functions/v1/notify/subscribe";
+
+// The VAPID key travels as base64url text but PushManager wants raw bytes.
+function urlBase64ToUint8Array(base64String) {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const out = new Uint8Array(raw.length);
+  for (let i = 0; i < raw.length; i++) out[i] = raw.charCodeAt(i);
+  return out;
+}
+
+// True only where a background push can actually be delivered. On iOS/iPadOS,
+// Safari fires push ONLY for a PWA installed to the home screen — in a normal
+// tab pushManager exists but never delivers, so feature-detection alone lies.
+function pushCanWork() {
+  if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  if (!isIOS) return true;
+  return window.matchMedia("(display-mode: standalone)").matches || navigator.standalone === true;
+}
+
+// Ask permission, create a real push subscription, and register it against this
+// device_key so the server can reach this browser while the app is shut.
+async function requestNotifyPermission() {
+  if (!("Notification" in window)) return;
+
+  if (Notification.permission === "default") {
+    try {
+      const perm = await Notification.requestPermission();
+      render();
+      if (perm !== "granted") return;
+    } catch (e) { return; }
+  }
+  if (Notification.permission !== "granted") return;
+
+  if (!pushCanWork()) {
+    // Permission still matters: notify() works while the tab is open, and the
+    // server's SMS covers this student when it isn't.
+    console.info("[push] background push unavailable here (iOS needs Add to Home Screen) — relying on SMS");
+    return;
+  }
+
+  try {
+    const reg = await navigator.serviceWorker.ready;
+    let sub = await reg.pushManager.getSubscription();
+    if (!sub) {
+      sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(VAPID_PUBLIC_KEY),
+      });
+    }
+    const res = await fetch(SUBSCRIBE_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ device_key: deviceKey, subscription: sub.toJSON() }),
+    });
+    const out = await res.json().catch(() => ({}));
+    if (!res.ok) { console.error("[push] subscribe rejected:", out.error || res.status); return; }
+    console.info("[push] subscribed for device", deviceKey);
+  } catch (e) {
+    // Never let a push failure break ordering — SMS still covers the student.
+    console.error("[push] subscribe failed:", e && e.message ? e.message : e);
+  }
 }
 async function notify(title, body) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
@@ -352,6 +419,11 @@ probeStripe();
 // PWA: register service worker (only works over https — i.e. once hosted on Netlify)
 if ("serviceWorker" in navigator && location.protocol === "https:") {
   navigator.serviceWorker.register("sw.js").catch(() => {});
+  // Re-assert the push subscription on every load: browsers can silently rotate
+  // or drop an endpoint, and a stale row means a silent "order ready".
+  navigator.serviceWorker.ready
+    .then(() => { if (window.Notification && Notification.permission === "granted") requestNotifyPermission(); })
+    .catch(() => {});
 }
 </script>
 </body>
