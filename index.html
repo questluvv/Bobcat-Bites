@@ -138,6 +138,11 @@ function go(screen) {
 const VAPID_PUBLIC_KEY = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
 const SUBSCRIBE_URL = SUPABASE_URL + "/functions/v1/notify/subscribe";
 
+// True once this browser has a live server-side push subscription. When it is,
+// the server already sends confirmed/ready alerts, so the local poll loop must
+// NOT fire its own copy — otherwise the student gets two of every notification.
+let pushActive = false;
+
 // The VAPID key travels as base64url text but PushManager wants raw bytes.
 function urlBase64ToUint8Array(base64String) {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
@@ -176,6 +181,7 @@ async function requestNotifyPermission() {
   if (!pushCanWork()) {
     // Permission still matters: notify() works while the tab is open, and the
     // server's SMS covers this student when it isn't.
+    pushActive = false;
     console.info("[push] background push unavailable here (iOS needs Add to Home Screen) — relying on SMS");
     return;
   }
@@ -195,10 +201,12 @@ async function requestNotifyPermission() {
       body: JSON.stringify({ device_key: deviceKey, subscription: sub.toJSON() }),
     });
     const out = await res.json().catch(() => ({}));
-    if (!res.ok) { console.error("[push] subscribe rejected:", out.error || res.status); return; }
+    if (!res.ok) { pushActive = false; console.error("[push] subscribe rejected:", out.error || res.status); return; }
+    pushActive = true;
     console.info("[push] subscribed for device", deviceKey);
   } catch (e) {
     // Never let a push failure break ordering — SMS still covers the student.
+    pushActive = false;
     console.error("[push] subscribe failed:", e && e.message ? e.message : e);
   }
 }
@@ -217,6 +225,10 @@ function notifyOrderChanges(prevOrders, freshOrders) {
     const prev = prevOrders.find((p) => p.id === o.id);
     const truck = o.vendors?.name || "The truck";
     if (prev && prev.status !== o.status) {
+      // The server pushes confirmed/ready itself. If push is live for this
+      // browser, firing locally too would double up every alert — so the local
+      // copy is only a fallback for browsers push can't reach (iOS Safari tab).
+      if (pushActive) return;
       if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
       if (o.status === "ready") {
         // The vendor can mark ready before the ETA runs out — call that out so
@@ -227,7 +239,8 @@ function notifyOrderChanges(prevOrders, freshOrders) {
       return;
     }
     // Heads-up inside the last 3 minutes of the countdown so the student
-    // starts walking before the food is sitting on the counter.
+    // starts walking before the food is sitting on the counter. This one is
+    // client-only — the server has no timer — so it fires regardless of push.
     if (o.status === "confirmed" && prev?.status === "confirmed" && !nearNotified.has(o.id)) {
       const cd = countdownFor(o);
       if (cd && cd.left > 0 && cd.left <= 3 * 60000) {
