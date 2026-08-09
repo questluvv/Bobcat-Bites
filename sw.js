@@ -1,6 +1,6 @@
-// Bobcat Bites service worker — v3
+// Bobcat Bites service worker — v4
 // Network-first for pages (so updates ship instantly), cache fallback for offline shell.
-const CACHE = "bobcat-bites-v3";
+const CACHE = "bobcat-bites-v4";
 const SHELL = [
   "./index.html",
   "./vendor_app.html",
@@ -22,17 +22,24 @@ self.addEventListener("activate", (e) => {
   );
 });
 
-// --- Web Push: new-order alerts for vendors ---
+// --- Web Push: order alerts. Two audiences arrive on this same handler:
+//     "vendor"  → new order came in        (routes to vendor_app.html)
+//     "student" → their order changed status (routes to index.html)
+//     The server sets `audience`; fall back to vendor for older payloads.
 self.addEventListener("push", (e) => {
   let d = {};
   try { d = e.data ? e.data.json() : {}; } catch { d = { body: e.data && e.data.text() }; }
+  const isStudent = d.audience === "student";
+  const icon = isStudent ? "icon-192.png" : "icon-vendor-192.png";
   e.waitUntil(self.registration.showNotification(d.title || "Bobcat Bites", {
-    body: d.body || "You have a new order.",
-    tag: d.tag || "new-order",
-    icon: "icon-vendor-192.png",
-    badge: "icon-vendor-192.png",
-    data: { url: d.url || "./vendor_app.html" },
-    requireInteraction: true,
+    body: d.body || (isStudent ? "Your order was updated." : "You have a new order."),
+    tag: d.tag || (isStudent ? "bb-order-update" : "new-order"),
+    renotify: true,
+    icon,
+    badge: icon,
+    data: { url: d.url || (isStudent ? "./index.html" : "./vendor_app.html") },
+    // Vendors must not miss an order; students shouldn't have a sticky banner.
+    requireInteraction: !isStudent,
   }));
 });
 
