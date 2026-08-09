@@ -138,10 +138,20 @@ function go(screen) {
 const VAPID_PUBLIC_KEY = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
 const SUBSCRIBE_URL = SUPABASE_URL + "/functions/v1/notify/subscribe";
 
-// True once this browser has a live server-side push subscription. When it is,
-// the server already sends confirmed/ready alerts, so the local poll loop must
-// NOT fire its own copy — otherwise the student gets two of every notification.
-let pushActive = false;
+// Whether a server-side push subscription currently exists for THIS browser.
+// Asked live rather than cached in a flag: the subscription row lives on the
+// server regardless of how the app is being viewed right now, so guessing from
+// the user agent gets it wrong (open the PWA's URL in a plain tab and the guess
+// says "no push" while the server is still happily pushing to the stored
+// endpoint — which is exactly how every alert ended up duplicated).
+async function hasPushSubscription() {
+  try {
+    if (!("serviceWorker" in navigator) || !("PushManager" in window)) return false;
+    const reg = await navigator.serviceWorker.getRegistration();
+    if (!reg) return false;
+    return !!(await reg.pushManager.getSubscription());
+  } catch (e) { return false; }
+}
 
 // The VAPID key travels as base64url text but PushManager wants raw bytes.
 function urlBase64ToUint8Array(base64String) {
@@ -181,7 +191,7 @@ async function requestNotifyPermission() {
   if (!pushCanWork()) {
     // Permission still matters: notify() works while the tab is open, and the
     // server's SMS covers this student when it isn't.
-    pushActive = false;
+    // (no cached flag — hasPushSubscription() is asked live at notify time)
     console.info("[push] background push unavailable here (iOS needs Add to Home Screen) — relying on SMS");
     return;
   }
@@ -201,23 +211,35 @@ async function requestNotifyPermission() {
       body: JSON.stringify({ device_key: deviceKey, subscription: sub.toJSON() }),
     });
     const out = await res.json().catch(() => ({}));
-    if (!res.ok) { pushActive = false; console.error("[push] subscribe rejected:", out.error || res.status); return; }
-    pushActive = true;
+    if (!res.ok) { console.error("[push] subscribe rejected:", out.error || res.status); return; }
+
     console.info("[push] subscribed for device", deviceKey);
   } catch (e) {
     // Never let a push failure break ordering — SMS still covers the student.
-    pushActive = false;
+    // (no cached flag — hasPushSubscription() is asked live at notify time)
     console.error("[push] subscribe failed:", e && e.message ? e.message : e);
   }
 }
-async function notify(title, body) {
+// opts.alsoSentByServer: the server pushes this same alert. Fire locally only
+// if this browser has no push subscription, otherwise the student gets two.
+// opts.tag: matched to the server's tag ("bb-order-<id>") so that even if both
+// somehow fire, the browser REPLACES rather than stacks them.
+async function notify(title, body, opts) {
   if (!("Notification" in window) || Notification.permission !== "granted") return;
-  const opts = { body, icon: "icon-192.png", badge: "icon-192.png", tag: "bb-order-update", renotify: true, data: { url: "./index.html" } };
+  if (opts && opts.alsoSentByServer && (await hasPushSubscription())) return;
+  const o = {
+    body,
+    icon: "icon-192.png",
+    badge: "icon-192.png",
+    tag: (opts && opts.tag) || "bb-order-update",
+    renotify: true,
+    data: { url: "./index.html" },
+  };
   try {
     const reg = navigator.serviceWorker && (await navigator.serviceWorker.getRegistration());
-    if (reg) { reg.showNotification(title, opts); return; }
+    if (reg) { reg.showNotification(title, o); return; }
   } catch (e) {}
-  try { new Notification(title, opts); } catch (e) {}
+  try { new Notification(title, o); } catch (e) {}
 }
 const nearNotified = new Set();
 function notifyOrderChanges(prevOrders, freshOrders) {
@@ -225,16 +247,17 @@ function notifyOrderChanges(prevOrders, freshOrders) {
     const prev = prevOrders.find((p) => p.id === o.id);
     const truck = o.vendors?.name || "The truck";
     if (prev && prev.status !== o.status) {
-      // The server pushes confirmed/ready itself. If push is live for this
-      // browser, firing locally too would double up every alert — so the local
-      // copy is only a fallback for browsers push can't reach (iOS Safari tab).
-      if (pushActive) return;
-      if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`);
+      // The server pushes confirmed/ready itself. These are flagged
+      // alsoSentByServer so notify() suppresses the local copy whenever a push
+      // subscription exists, and shares the server's tag so a race replaces
+      // rather than stacks. Browsers push can't reach still get them locally.
+      const serverAlso = { alsoSentByServer: true, tag: "bb-order-" + o.id };
+      if (o.status === "confirmed") notify("Order confirmed 🎉", `${truck} says it'll be ready in about ${o.eta_minutes} min.`, serverAlso);
       if (o.status === "ready") {
         // The vendor can mark ready before the ETA runs out — call that out so
         // the student knows not to wait for the countdown.
         const early = o.confirmed_at && o.eta_minutes && new Date(o.confirmed_at).getTime() + o.eta_minutes * 60000 > Date.now() + 60000;
-        notify(early ? "Ready early — it beat the clock! 🏃" : "Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`);
+        notify(early ? "Ready early — it beat the clock! 🏃" : "Order ready for pickup 🔔", `Show code ${o.pickup_code || ""} at ${truck}.`, serverAlso);
       }
       return;
     }
