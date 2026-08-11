@@ -1,0 +1,40 @@
+/* Bobcat Bites — shared styles for the policy / contact pages.
+   Tokens copied from index.html so these pages read as part of the app
+   rather than something bolted on. */
+:root {
+  --blue:#1a73e8; --blue-dark:#135cc0; --blue-light:#e8f1fd; --blue-line:#d4e4f9;
+  --red:#e5484d; --bg:#f6f9fd; --card:#fff; --ink:#17222e; --muted:#64748b;
+}
+* { box-sizing:border-box; margin:0; }
+body {
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+  background:var(--bg); color:var(--ink); line-height:1.6;
+}
+header {
+  background:#fff; padding:16px 20px; border-bottom:1px solid var(--blue-line);
+  position:sticky; top:0; z-index:10;
+}
+header a.brand { font-size:20px; font-weight:700; color:var(--blue-dark); text-decoration:none; }
+header a.brand span { color:var(--red); }
+main { max-width:720px; margin:0 auto; padding:24px 16px 64px; }
+.card {
+  background:var(--card); border-radius:16px; padding:24px; margin-bottom:16px;
+  box-shadow:0 1px 2px rgba(23,58,110,.06), 0 4px 14px rgba(23,58,110,.05);
+  border:1px solid #eaf1fa;
+}
+h1 { font-size:26px; margin-bottom:6px; }
+h2 { font-size:17px; margin:22px 0 8px; }
+h2:first-of-type { margin-top:0; }
+p, li { font-size:15px; margin-bottom:10px; }
+ul { padding-left:22px; }
+a { color:var(--blue); }
+.updated { color:var(--muted); font-size:13px; margin-bottom:20px; }
+.notice {
+  background:var(--blue-light); border:1px solid var(--blue-line); color:#1c5aa8;
+  border-radius:10px; padding:12px 14px; font-size:14px; margin-bottom:20px;
+}
+footer {
+  max-width:720px; margin:0 auto; padding:0 16px 48px;
+  color:var(--muted); font-size:13px; text-align:center;
+}
+footer a { margin:0 8px; white-space:nowrap; }
