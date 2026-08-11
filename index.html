@@ -53,12 +53,23 @@
   .code { font-size:28px; font-weight:800; letter-spacing:6px; color:#fff; background:var(--blue); border-radius:12px; text-align:center; padding:10px; margin-top:8px; }
   .banner { background:var(--blue-light); border:1px solid var(--blue-line); color:#1c5aa8; border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:12px; }
   .total { display:flex; justify-content:space-between; font-weight:700; font-size:16px; padding-top:10px; }
+  .sitefoot { max-width:520px; margin:0 auto; padding:4px 16px 20px; text-align:center; font-size:12px; color:var(--muted); }
+  .sitefoot a { color:var(--muted); margin:0 6px; text-decoration:none; white-space:nowrap; }
+  .sitefoot a:hover { color:var(--blue); text-decoration:underline; }
+  .sitefoot-note { margin-top:6px; font-size:11px; opacity:.85; }
   .empty { text-align:center; color:var(--muted); padding:40px 0; }
 </style>
 </head>
 <body>
 <header><h1>🐾 Bobcat <span>Bites</span></h1><span class="muted">UC Merced</span></header>
 <main id="view"></main>
+<!-- Policy links must be reachable from the landing page, not just by URL:
+     Stripe's risk review flagged "no verifiable contact or policy information".
+     Sits above the fixed bottom nav (body already has padding-bottom for it). -->
+<div class="sitefoot">
+  <a href="contact.html">Contact</a>·<a href="terms.html">Terms</a>·<a href="refunds.html">Refunds</a>·<a href="privacy.html">Privacy</a>
+  <div class="sitefoot-note">Independent student-built service. Not affiliated with UC Merced.</div>
+</div>
 <nav>
   <button id="nav-trucks" class="active" onclick="go('trucks')"><span class="ico">🚚</span>Trucks</button>
   <button id="nav-orders" onclick="go('orders')"><span class="ico">🧾</span>My Orders</button>
