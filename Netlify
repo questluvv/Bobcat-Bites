@@ -1,0 +1,44 @@
+# Bobcat Bites — Netlify config
+# Static site: no build step, files are served straight from the repo root.
+
+[build]
+  publish = "."
+
+# --- Service worker must never be served stale ---
+# sw.js decides how every notification renders and controls the offline cache.
+# If a CDN pins an old copy, students keep running old code long after a deploy
+# and you end up debugging a version that isn't live anymore. Revalidate always.
+[[headers]]
+  for = "/sw.js"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Same reasoning for the PWA manifests — these drive the Add to Home Screen
+# install, which is what unlocks web push on iOS.
+[[headers]]
+  for = "/*.webmanifest"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# The app shell is two hand-edited HTML files; a stale one is the same class of
+# bug as a stale worker, so revalidate rather than cache hard.
+[[headers]]
+  for = "/*.html"
+  [headers.values]
+    Cache-Control = "public, max-age=0, must-revalidate"
+
+# Icons are content-stable and safe to cache aggressively.
+[[headers]]
+  for = "/*.png"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+
+# --- Baseline security headers ---
+# Cheap to add, and a real domain with sane headers also helps the Stripe risk
+# review, which flagged the GitHub Pages origin as low-trust.
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Content-Type-Options = "nosniff"
+    X-Frame-Options = "DENY"
+    Referrer-Policy = "strict-origin-when-cross-origin"
