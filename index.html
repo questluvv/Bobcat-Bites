@@ -354,7 +354,7 @@ async function placeOrder() {
     requestNotifyPermission();
     go("orders");
     toast("Order placed! Code " + res.pickup_code);
-  } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Place order — demo pay"; }
+  } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Reserve order (preview)"; }
 }
 
 async function loadOrders() {
@@ -388,8 +388,14 @@ function etaMotto(left) {
 function render() {
   const v = $("view");
   if (state.screen === "trucks") {
-    v.innerHTML = `<div class="banner">🧪 Test mode — payment is simulated (Stripe not connected yet). Orders are real in the system.</div>
-      <h2>Food trucks on campus</h2>` +
+    // Banner reflects the ACTUAL payment state rather than being hardcoded.
+    // Once live keys are set, stripeEnabled flips true and the pre-launch
+    // notice disappears on its own — no code change needed at launch.
+    const launchBanner = stripeEnabled
+      ? ""
+      : `<div class="banner">🎉 Launching Fall 2026 at UC Merced — browse the menus now. Card payments open on launch day.</div>`;
+    v.innerHTML = launchBanner +
+      `<h2>Food trucks on campus</h2>` +
       (!state.trucksLoaded ? `<div class="empty">Loading trucks…</div>` :
       state.trucks.length ? state.trucks.map((t) => `
         <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
@@ -422,8 +428,8 @@ function render() {
       <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">
         <input id="s_phone" type="tel" placeholder="Phone (optional)">
-        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">Demo payment — no card charged. Stripe checkout replaces this button later.</div>`}
-        <button class="primary" type="submit" id="placeBtn">${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Place order — demo pay"}</button>
+        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">🎉 Pre-launch preview — card payments open when we go live for Fall 2026. No card is charged.</div>`}
+        <button class="primary" type="submit" id="placeBtn">${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Reserve order (preview)"}</button>
       </form>`;
   }
   if (state.screen === "orders") {
