@@ -83,7 +83,13 @@ const SUPABASE_URL = "https://gqwihtfjmxqxkzssnsrk.supabase.co";
 const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
 const sb = supabase.createClient(SUPABASE_URL, KEY);
 
-let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null };
+// Read synchronously, before supabase-js consumes and strips the fragment.
+// A recovery link DOES create a real session, so without this the app would just
+// log the owner straight in and never ask for a new password — they'd be told
+// the reset "worked" while the old password still stood.
+const RECOVERY_IN_URL = /[#&?]type=recovery/.test(location.hash + location.search);
+
+let state = { user: null, vendor: null, screen: "orders", orders: [], menu: [], pollTimer: null, recovery: RECOVERY_IN_URL };
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
@@ -104,9 +110,62 @@ async function init() {
   if (state.user) await loadVendor();
   render();
 }
-sb.auth.onAuthStateChange((_e, session) => { state.user = session?.user || null; if (state.user) loadVendor().then(render); else render(); });
+sb.auth.onAuthStateChange((event, session) => {
+  state.user = session?.user || null;
+  // PASSWORD_RECOVERY arrives with a valid session attached. Fall through to the
+  // normal "logged in" path and the owner lands in the app with their password
+  // unchanged, which is the one outcome a reset flow must never produce.
+  if (event === "PASSWORD_RECOVERY") { state.recovery = true; return render(); }
+  if (state.recovery) return render();
+  if (state.user) loadVendor().then(render); else render();
+});
+
+async function forgotPassword() {
+  const email = $("email").value.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    return toast("Put your email in the Email box first, then tap Forgot password.", "error");
+  }
+  const { error } = await sb.auth.resetPasswordForEmail(email, { redirectTo: location.origin + location.pathname });
+  // Rate limits are worth surfacing because they're actionable. Everything else
+  // gets one fixed message: saying "no account with that email" would let anyone
+  // probe which trucks are registered.
+  if (error && /rate|limit|too many/i.test(error.message)) {
+    return toast("Too many reset emails just now — give it a minute and try again.", "error");
+  }
+  if (error) console.error("[reset]", error.message);
+  toast("If that email has an account, a reset link is on its way.");
+}
+
+async function setNewPassword() {
+  const a = $("np").value, b = $("np2").value;
+  if (a.length < 6) return toast("Password needs at least 6 characters.", "error");
+  if (a !== b) return toast("Those two passwords don't match.", "error");
+  const { data, error } = await sb.auth.updateUser({ password: a });
+  if (error) return toast(error.message, "error");
+  // Take the user straight off the response rather than waiting for the auth
+  // event to land — otherwise the password is already changed and the very next
+  // line reads state.user.id off a null, crashing right after saying it worked.
+  state.user = data?.user || state.user;
+  state.recovery = false;
+  history.replaceState(null, "", location.pathname);
+  toast("Password updated ✓");
+  if (state.user) await loadVendor();
+  render();
+}
+
+// Leaving the recovery session signed in would hand a working login to anyone
+// who opened the link, so backing out signs out rather than just hiding the form.
+async function cancelRecovery() {
+  state.recovery = false;
+  history.replaceState(null, "", location.pathname);
+  await sb.auth.signOut();
+  render();
+}
 
 async function loadVendor() {
+  // Callers can reach here mid auth transition (recovery, sign-out races), where
+  // dereferencing a null user takes the whole app down rather than showing a screen.
+  if (!state.user) { state.vendor = null; return; }
   const { data } = await sb.from("vendors").select("*").eq("owner_user_id", state.user.id).maybeSingle();
   state.vendor = data || null;
 }
@@ -451,6 +510,20 @@ function render() {
   $("tabs").style.display = state.user && state.vendor ? "flex" : "none";
   clearInterval(state.pollTimer);
 
+  // Checked before the logged-out gate AND before the app itself: a recovery
+  // session is a real session, so this screen is the only thing standing between
+  // the link and a silently-unchanged password.
+  if (state.recovery) {
+    v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();setNewPassword()">
+      <h2>Choose a new password</h2>
+      <p class="muted" style="margin-bottom:10px">You're here from a reset link. Pick a new password to finish — you'll stay signed in.</p>
+      <input id="np" type="password" placeholder="New password (6+ chars)" autocomplete="new-password">
+      <input id="np2" type="password" placeholder="Repeat new password" autocomplete="new-password">
+      <button class="primary" type="submit">Save new password</button>
+      <div style="height:8px"></div>
+      <button class="ghost" type="button" onclick="cancelRecovery()">Cancel</button></form></div>`;
+    return;
+  }
   if (!state.user) {
     v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();login()"><h2>Truck owner sign in</h2>
       <input id="email" type="email" placeholder="Email" autocomplete="username">
@@ -458,6 +531,7 @@ function render() {
       <button class="primary" type="submit">Log in</button>
       <div style="height:8px"></div>
       <button class="ghost" type="button" onclick="signup()">Create account</button>
+      <div style="text-align:center;margin-top:10px"><button class="small b-done" type="button" onclick="forgotPassword()" style="background:none;color:var(--blue)">Forgot password?</button></div>
       <p class="muted" style="margin-top:10px">New here? Fill in email + password above, then hit Create account — you'll be logged in instantly.</p></form></div>`;
     return;
   }
