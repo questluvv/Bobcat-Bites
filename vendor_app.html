@@ -373,14 +373,36 @@ async function cancelOrder(id, started) {
   setOrder(id, "cancelled");
 }
 
+// Which statuses an order may legally move FROM. The vendor app writes to the
+// orders table directly, so a button rendered a moment ago can still fire after
+// the row underneath it has changed. Without this guard, sending an ETA on an
+// order that was just declined resurrects it: status goes back to 'confirmed',
+// the DB trigger pushes the student an "Order confirmed" alert, and the truck
+// starts cooking food it has already refunded.
+const ALLOWED_FROM = {
+  confirmed: ["placed"],
+  ready: ["confirmed"],
+  picked_up: ["ready"],
+  cancelled: ["placed", "confirmed", "ready"],
+};
+
 async function setOrder(id, status, extra = {}) {
   const patch = { status, updated_at: new Date().toISOString(), ...extra };
   if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
   if (status === "ready") patch.ready_at = new Date().toISOString();
   if (status === "picked_up") patch.picked_up_at = new Date().toISOString();
   if (status === "cancelled") patch.cancelled_at = new Date().toISOString();
-  const { error } = await sb.from("orders").update(patch).eq("id", id);
+  // The .in() makes this a compare-and-set in one statement, so the database
+  // settles the race rather than a read-then-write that can interleave.
+  const from = ALLOWED_FROM[status];
+  let q = sb.from("orders").update(patch).eq("id", id);
+  if (from) q = q.in("status", from);
+  const { data, error } = await q.select("id");
   if (error) return toast(error.message, "error");
+  if (from && !data?.length) {
+    toast("That order already moved on — refreshing", "error");
+    return loadOrders();
+  }
   await sb.from("order_status_events").insert({ order_id: id, status, note: extra.eta_minutes ? `ETA ${extra.eta_minutes} min` : null });
   loadOrders();
 }

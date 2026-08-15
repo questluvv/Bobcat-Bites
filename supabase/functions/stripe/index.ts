@@ -244,15 +244,25 @@ Deno.serve(async (req) => {
         // Refund BEFORE touching the row: if the DB write then fails the order
         // stays visible and the idempotency key makes the retry a no-op, which
         // is the safe direction to fail in.
-        const refund = await stripe("refunds", {
-          payment_intent: order.payment_intent_id,
-          reverse_transfer: true,
-          refund_application_fee: true,
-          metadata: { order_id: order.id },
-        }, "POST", "refund_" + order.id);
-        refunded = true;
-        refundId = refund.id;
-        console.log("[refund]", order.id, refund.id, refund.status, order.total_cents);
+        try {
+          const refund = await stripe("refunds", {
+            payment_intent: order.payment_intent_id,
+            reverse_transfer: true,
+            refund_application_fee: true,
+            metadata: { order_id: order.id },
+          }, "POST", "refund_" + order.id);
+          refunded = true;
+          refundId = refund.id;
+          console.log("[refund]", order.id, refund.id, refund.status, order.total_cents);
+        } catch (e) {
+          // The idempotency key only shields repeats for ~24h, and a refund
+          // issued by hand in the Dashboard has no key at all. In both cases the
+          // student already has their money, so treating this as fatal would
+          // strand the order in the queue forever with no way to clear it.
+          if (!/already been refunded/i.test((e as Error).message)) throw e;
+          refunded = true;
+          console.log("[refund]", order.id, "already refunded — cancelling only");
+        }
       }
 
       const now = new Date().toISOString();
@@ -267,7 +277,7 @@ Deno.serve(async (req) => {
         order_id: order.id,
         status: "cancelled",
         note: refunded
-          ? `cancelled by truck — refunded $${(order.total_cents / 100).toFixed(2)} (${refundId})`
+          ? `cancelled by truck — refunded $${(order.total_cents / 100).toFixed(2)}${refundId ? ` (${refundId})` : " (already refunded)"}`
           : "cancelled by truck — nothing to refund",
       });
       return json({ ok: true, refunded, refund_id: refundId, amount_cents: refunded ? order.total_cents : 0 });
