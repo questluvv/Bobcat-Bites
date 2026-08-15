@@ -182,6 +182,30 @@ async function stripeApi(payload) {
   if (!r.ok) throw new Error(j.error || "Request failed");
   return j;
 }
+// Stripe returns machine keys like "individual.id_number". Operators shouldn't
+// have to decode those, so translate the ones Express onboarding actually asks
+// for and fall back to a readable version of the key for anything unmapped.
+const PAYOUT_NEEDS = {
+  "external_account": "Your bank account details",
+  "individual.id_number": "Your SSN (or ID number)",
+  "individual.ssn_last_4": "The last 4 digits of your SSN",
+  "individual.verification.document": "A photo of your ID",
+  "individual.verification.additional_document": "A proof-of-address document",
+  "company.tax_id": "Your EIN",
+  "tos_acceptance.date": "Accepting Stripe's terms",
+  "tos_acceptance.ip": "Accepting Stripe's terms",
+  "business_profile.url": "A website for your truck",
+  "business_profile.mcc": "Your business category",
+};
+const payoutNeed = (key) =>
+  PAYOUT_NEEDS[key] ||
+  (/\.dob\./.test(key) ? "Your date of birth"
+   : /\.address\./.test(key) ? "Your address"
+   : /\.(first_name|last_name)$/.test(key) ? "Your legal name"
+   : /\.phone$/.test(key) ? "Your phone number"
+   : /\.email$/.test(key) ? "Your email address"
+   : key.split(".").pop().replace(/_/g, " "));
+
 async function fillPayoutCard() {
   try {
     const { enabled } = await stripeApi({ action: "status" });
@@ -190,11 +214,20 @@ async function fillPayoutCard() {
     const el = $("payoutCard"); // looked up after the awaits — render may have rebuilt the view
     if (!el) return;
     el.className = "card"; el.style.display = "";
-    el.innerHTML = st.charges_enabled
+    // "Active" needs all three: charges_enabled alone still leaves money stuck at
+    // Stripe if transfers isn't live or payouts are on hold, and telling an
+    // operator their sales are landing when they aren't is worse than saying nothing.
+    const ready = st.charges_enabled && st.payouts_enabled && st.transfers === "active";
+    const due = Array.isArray(st.requirements_due) ? st.requirements_due : [];
+    el.innerHTML = ready
       ? `<b>\ud83d\udcb8 Payouts: active</b><div class="muted">Card orders pay straight into your bank. Manage details any time via the button below.</div><div style="height:10px"></div><button class="ghost" onclick="openPayouts()">Payout settings</button>`
-      : st.connected
+      : !st.connected
+      ? `<b>\ud83d\udcb8 Get paid by card</b><div class="muted" style="margin-bottom:10px">Set up payouts with Stripe (~10 min) \u2014 students pay in the app and sales land in your bank automatically.</div><button class="primary" onclick="openPayouts()">Set up payouts</button>`
+      : due.length
+      ? `<b>\ud83d\udcb8 Payouts: action needed</b><div class="muted" style="margin-bottom:10px">Stripe still needs ${due.length === 1 ? "one detail" : due.length + " details"} before card orders can pay out:<ul style="margin:6px 0 0 18px;padding:0">${due.slice(0, 5).map((r) => `<li>${esc(payoutNeed(r))}</li>`).join("")}</ul>${due.length > 5 ? `<div style="margin-top:6px">\u2026and ${due.length - 5} more.</div>` : ""}</div><button class="primary" onclick="openPayouts()">Finish payout setup</button>`
+      : !st.details_submitted
       ? `<b>\ud83d\udcb8 Payouts: almost there</b><div class="muted" style="margin-bottom:10px">Stripe still needs a few details before card orders can pay out.</div><button class="primary" onclick="openPayouts()">Finish payout setup</button>`
-      : `<b>\ud83d\udcb8 Get paid by card</b><div class="muted" style="margin-bottom:10px">Set up payouts with Stripe (~10 min) \u2014 students pay in the app and sales land in your bank automatically.</div><button class="primary" onclick="openPayouts()">Set up payouts</button>`;
+      : `<b>\ud83d\udcb8 Payouts: under review</b><div class="muted" style="margin-bottom:10px">You've sent Stripe everything \u2014 they're verifying it now, which usually takes a business day. ${st.charges_enabled ? "Card orders still work in the meantime; the money is held and released once this clears." : "Card orders are paused until this clears."}</div><button class="ghost" onclick="openPayouts()">Check with Stripe</button>`;
   } catch (e) { /* function not deployed yet \u2014 keep hidden */ }
 }
 async function openPayouts() {
@@ -318,6 +351,23 @@ async function loadOrders() {
   if (state.screen === "orders") render();
 }
 
+// Cancelling goes through the edge function, never straight to the table: the
+// student has already been charged by this point and our refund policy promises
+// their money back automatically. Falls back to a plain status write only when
+// Stripe isn't configured at all (nothing was charged, so nothing to refund).
+async function cancelOrder(id) {
+  try {
+    const r = await stripeApi({ action: "cancel_order", order_id: id });
+    toast(r.refunded ? `Order declined — $${(r.amount_cents / 100).toFixed(2)} refunded` : "Order declined");
+    loadOrders();
+    return;
+  } catch (e) {
+    const { enabled } = await stripeApi({ action: "status" }).catch(() => ({ enabled: false }));
+    if (enabled) return toast("Couldn't refund: " + e.message, "error");
+  }
+  setOrder(id, "cancelled");
+}
+
 async function setOrder(id, status, extra = {}) {
   const patch = { status, updated_at: new Date().toISOString(), ...extra };
   if (status === "confirmed") patch.confirmed_at = new Date().toISOString();
@@ -410,7 +460,7 @@ function render() {
             <div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}${o.students?.phone ? " · 📱 " + esc(o.students.phone) : ""}${o.eta_minutes ? " · ETA " + o.eta_minutes + " min" : ""}</div>
             ${(o.order_items || []).map((i) => `<div class="item"><b>${i.quantity}×</b> ${esc(i.item_name_snapshot)}${i.notes ? `<div class="muted">📝 ${esc(i.notes)}</div>` : ""}</div>`).join("")}
             <div class="row" style="margin-top:10px">
-              ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="setOrder('${o.id}','cancelled')">Decline</button>` : ""}
+              ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="cancelOrder('${o.id}')">Decline</button>` : ""}
               ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button>` : ""}
               ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button>` : ""}
             </div>
