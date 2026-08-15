@@ -79,6 +79,16 @@
 const SUPABASE_URL = "https://gqwihtfjmxqxkzssnsrk.supabase.co";
 const KEY = "sb_publishable_3H-dZcAz2r7pDnGmxMJh1w_efPN7ZVd";
 const API = SUPABASE_URL + "/functions/v1/api";
+
+// A password reset is a VENDOR flow, but Supabase falls back to the Site URL —
+// this student app — whenever a redirectTo fails the allowlist check. That fails
+// silently: the owner lands on the ordering page holding a live recovery token
+// and nothing here consumes it. Hand it to the vendor app with the fragment
+// intact. Read before createClient, which strips the fragment on startup.
+if (/[#&?]type=recovery/.test(location.hash + location.search)) {
+  location.replace("./vendor_app.html" + location.search + location.hash);
+}
+
 const sb = supabase.createClient(SUPABASE_URL, KEY);
 
 // Device identity (no login needed for v0)
