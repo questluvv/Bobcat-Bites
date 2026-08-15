@@ -355,10 +355,15 @@ async function loadOrders() {
 // student has already been charged by this point and our refund policy promises
 // their money back automatically. Falls back to a plain status write only when
 // Stripe isn't configured at all (nothing was charged, so nothing to refund).
-async function cancelOrder(id) {
+// `started` = the truck already confirmed it, so the food may exist. Declining a
+// brand-new order is routine and shouldn't nag; scrapping one that's on the
+// grill is a real decision, so that path asks first and says so plainly.
+async function cancelOrder(id, started) {
+  if (started && !confirm("Cancel this order and refund the student in full?\n\nThe food may already be made — you won't be paid for it.")) return;
+  const verb = started ? "cancelled" : "declined";
   try {
     const r = await stripeApi({ action: "cancel_order", order_id: id });
-    toast(r.refunded ? `Order declined — $${(r.amount_cents / 100).toFixed(2)} refunded` : "Order declined");
+    toast(r.refunded ? `Order ${verb} — $${(r.amount_cents / 100).toFixed(2)} refunded` : `Order ${verb}`);
     loadOrders();
     return;
   } catch (e) {
@@ -461,8 +466,8 @@ function render() {
             ${(o.order_items || []).map((i) => `<div class="item"><b>${i.quantity}×</b> ${esc(i.item_name_snapshot)}${i.notes ? `<div class="muted">📝 ${esc(i.notes)}</div>` : ""}</div>`).join("")}
             <div class="row" style="margin-top:10px">
               ${st === "placed" ? `<button class="small b-confirm" style="flex:1" onclick="confirmOrder('${o.id}')">Confirm + set ETA</button><button class="small b-danger" onclick="cancelOrder('${o.id}')">Decline</button>` : ""}
-              ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button>` : ""}
-              ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button>` : ""}
+              ${st === "confirmed" ? `<button class="small b-ready" style="flex:1" onclick="setOrder('${o.id}','ready')">Mark ready 🔔</button><button class="small b-danger" onclick="cancelOrder('${o.id}', true)">Cancel</button>` : ""}
+              ${st === "ready" ? `<button class="small b-done" style="flex:1" onclick="setOrder('${o.id}','picked_up')">Picked up ✓</button><button class="small b-danger" onclick="cancelOrder('${o.id}', true)">Cancel</button>` : ""}
             </div>
           </div>`).join("") : `<div class="empty">Nothing here</div>`);
       }).join("");
