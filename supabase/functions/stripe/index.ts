@@ -1,22 +1,23 @@
 // Bobcat Bites — Stripe Connect edge function
 //
-// Deploy separately from the existing `api` function (this never touches it):
-//   supabase functions deploy stripe --no-verify-jwt
-// (--no-verify-jwt is required: Stripe's webhook calls carry no Supabase JWT.
-//  Every route below does its own auth — webhook via signature, vendor routes
-//  via the caller's user JWT, checkout via server-side validation.)
-//
 // Required secrets (Dashboard → Edge Functions → Secrets):
 //   STRIPE_SECRET_KEY       sk_test_... to start, sk_live_... when ready
-//   STRIPE_WEBHOOK_SECRET   whsec_... from the webhook endpoint you create at
-//                           https://dashboard.stripe.com/webhooks pointing to
+//   STRIPE_WEBHOOK_SECRET   whsec_... from the webhook endpoint pointing to
 //                           https://<project>.supabase.co/functions/v1/stripe/webhook
 //                           (events: checkout.session.completed, checkout.session.expired)
+//   NOTE: webhook endpoints are PER MODE. A live-mode endpoint receives nothing
+//   while the key is sk_test_ — create a test-mode endpoint and use ITS whsec_.
 // Optional:
 //   PLATFORM_FEE_BPS         basis points taken per order (default 700 = 7%)
 //   PLATFORM_FEE_FIXED_CENTS flat cents added on top (default 0)
-//   APP_URL                  where students return after paying
-//                            (default https://questluvv.github.io/Bobcat-Bites)
+//   APP_URL                  live origin students return to. NO trailing slash.
+//
+// ORDER LIFECYCLE (why 'pending_payment' exists):
+//   create_checkout inserts the order as 'pending_payment'. The vendor app only
+//   queries placed/confirmed/ready, and the DB trigger only pushes the "new
+//   order" alert on entry to 'placed'. So the truck learns about an order when
+//   Stripe confirms payment — never when the student merely taps Pay and then
+//   abandons checkout, which previously had vendors cooking unpaid food.
 
 import { createClient } from "jsr:@supabase/supabase-js@2";
 
@@ -24,7 +25,15 @@ const STRIPE_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
 const FEE_BPS = parseInt(Deno.env.get("PLATFORM_FEE_BPS") ?? "700", 10);
 const FEE_FIXED = parseInt(Deno.env.get("PLATFORM_FEE_FIXED_CENTS") ?? "0", 10);
-const APP_URL = Deno.env.get("APP_URL") ?? "https://questluvv.github.io/Bobcat-Bites";
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://questluvv.github.io/Bobcat-Bites").replace(/\/+$/, "");
+
+function computePlatformFeeCents(totalCents: number): { fee: number; safeBps: number; safeFixed: number } {
+  const safeBps = Number.isFinite(FEE_BPS) && FEE_BPS > 0 && FEE_BPS <= 10000 ? FEE_BPS : 700;
+  const safeFixed = Number.isFinite(FEE_FIXED) && FEE_FIXED >= 0 ? FEE_FIXED : 0;
+  const raw = Math.round((totalCents * safeBps) / 10000) + safeFixed;
+  const fee = Math.max(0, Math.min(totalCents, raw)); // clamp to [0, total]
+  return { fee, safeBps, safeFixed };
+}
 
 const admin = createClient(
   Deno.env.get("SUPABASE_URL")!,
@@ -38,7 +47,6 @@ const CORS = {
 const json = (body: unknown, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
 
-// ---- tiny Stripe client (form-encoded fetch; no SDK dependency) ----
 function form(params: Record<string, unknown>, prefix = "", out = new URLSearchParams()): URLSearchParams {
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === null) continue;
@@ -63,20 +71,22 @@ async function stripe(path: string, params?: Record<string, unknown>, method = "
   return body;
 }
 
-async function verifyStripeSig(payload: string, header: string | null): Promise<boolean> {
+async function verifyStripeSig(payload: string, header: string | null, toleranceSec = 300): Promise<boolean> {
   if (!header || !WEBHOOK_SECRET) return false;
   const parts = new Map(header.split(",").map((p) => p.split("=", 2) as [string, string]));
   const t = parts.get("t"), v1 = parts.get("v1");
   if (!t || !v1) return false;
+  if (Math.abs(Math.floor(Date.now() / 1000) - parseInt(t, 10)) > toleranceSec) return false;
   const enc = new TextEncoder();
   const key = await crypto.subtle.importKey("raw", enc.encode(WEBHOOK_SECRET), { name: "HMAC", hash: "SHA-256" }, false, ["sign"]);
   const mac = await crypto.subtle.sign("HMAC", key, enc.encode(`${t}.${payload}`));
   const hex = [...new Uint8Array(mac)].map((b) => b.toString(16).padStart(2, "0")).join("");
-  return hex === v1;
+  if (hex.length !== v1.length) return false;
+  let diff = 0;
+  for (let i = 0; i < hex.length; i++) diff |= hex.charCodeAt(i) ^ v1.charCodeAt(i);
+  return diff === 0;
 }
 
-// Insert tolerating columns that may not exist yet in this schema — retries
-// without the optional ones so the scaffold works before any orders-table tweaks.
 async function insertRow(table: string, row: Record<string, unknown>, optional: string[]) {
   let attempt = { ...row };
   for (let i = 0; i <= optional.length; i++) {
@@ -110,20 +120,38 @@ Deno.serve(async (req) => {
   // ---- Stripe webhook (auth = signature, not JWT) ----
   if (url.pathname.endsWith("/webhook")) {
     const payload = await req.text();
-    if (!(await verifyStripeSig(payload, req.headers.get("stripe-signature")))) {
+    const sigOk = await verifyStripeSig(payload, req.headers.get("stripe-signature"));
+    if (!sigOk) {
+      // Logged loudly: a wrong/missing STRIPE_WEBHOOK_SECRET looks identical to
+      // "Stripe never called" from the database side, and that ambiguity is
+      // expensive to debug. This line disambiguates the two.
+      console.error("[webhook] signature verification FAILED — check STRIPE_WEBHOOK_SECRET matches this endpoint's signing secret, and that the endpoint is in the same mode (test/live) as STRIPE_SECRET_KEY");
       return json({ error: "bad signature" }, 400);
     }
     const event = JSON.parse(payload);
     const session = event.data?.object;
     const orderId = session?.metadata?.order_id;
+    console.log("[webhook] received", event.type, "order", orderId ?? "(none)");
+
     if (orderId && event.type === "checkout.session.completed") {
+      // Promote to 'placed' — this is what fires the vendor's new-order push,
+      // via the DB trigger. Payment confirmed is the ONLY path to the kitchen.
       const patch: Record<string, unknown> = { status: "placed", updated_at: new Date().toISOString() };
       let { error } = await admin.from("orders").update({ ...patch, payment_intent_id: session.payment_intent }).eq("id", orderId);
       if (error) ({ error } = await admin.from("orders").update(patch).eq("id", orderId));
-      if (!error) await admin.from("order_status_events").insert({ order_id: orderId, status: "placed", note: "paid via Stripe" });
+      if (error) console.error("[webhook] failed to mark order paid:", error.message);
+      else {
+        await admin.from("order_status_events").insert({ order_id: orderId, status: "placed", note: "paid via Stripe" });
+        console.log("[webhook] order", orderId, "marked paid");
+      }
     }
+
     if (orderId && event.type === "checkout.session.expired") {
-      await admin.from("orders").update({ status: "cancelled", cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString() }).eq("id", orderId).eq("status", "pending_payment");
+      // Only abandon orders still awaiting payment — never touch one the vendor
+      // is already working on.
+      await admin.from("orders")
+        .update({ status: "cancelled", cancelled_at: new Date().toISOString(), updated_at: new Date().toISOString() })
+        .eq("id", orderId).eq("status", "pending_payment");
     }
     return json({ received: true });
   }
@@ -133,8 +161,7 @@ Deno.serve(async (req) => {
   const action = body.action as string;
 
   try {
-    // ---- feature probe: lets the frontend fail closed to demo pay ----
-    if (action === "status") return json({ enabled: !!STRIPE_KEY });
+    if (action === "status") return json({ enabled: !!STRIPE_KEY, app_url: APP_URL, webhook_secret_set: !!WEBHOOK_SECRET });
     if (!STRIPE_KEY) return json({ error: "Card payments aren't set up yet" }, 400);
 
     // ---- vendor: create/resume Stripe Express onboarding ----
@@ -171,10 +198,17 @@ Deno.serve(async (req) => {
       const vendor = await vendorForUser(user.id);
       if (!vendor?.payout_account_id) return json({ connected: false });
       const account = await stripe("accounts/" + vendor.payout_account_id, undefined, "GET");
-      return json({ connected: true, charges_enabled: account.charges_enabled, details_submitted: account.details_submitted, payouts_enabled: account.payouts_enabled });
+      return json({
+        connected: true,
+        charges_enabled: account.charges_enabled,
+        details_submitted: account.details_submitted,
+        payouts_enabled: account.payouts_enabled,
+        transfers: account.capabilities?.transfers ?? "unknown",
+        requirements_due: account.requirements?.currently_due ?? [],
+      });
     }
 
-    // ---- student: paid checkout (replaces demo pay when active) ----
+    // ---- student: paid checkout ----
     if (action === "create_checkout") {
       const { device_key, student_name, phone, vendor_id, items } = body as {
         device_key: string; student_name: string; phone?: string; vendor_id: string;
@@ -207,6 +241,8 @@ Deno.serve(async (req) => {
       }
 
       const pickup_code = String(Math.floor(1000 + Math.random() * 9000));
+      // 'pending_payment' keeps this out of the vendor's queue and suppresses the
+      // new-order push until the webhook confirms Stripe took the money.
       const order = await insertRow("orders", {
         student_id: student.id, vendor_id, status: "pending_payment", pickup_code,
         total_cents: total, subtotal_cents: total,
@@ -218,7 +254,19 @@ Deno.serve(async (req) => {
         }, ["menu_item_id"]);
       }
 
-      const fee = Math.min(total, Math.round((total * FEE_BPS) / 10000) + FEE_FIXED);
+      const { fee, safeBps, safeFixed } = computePlatformFeeCents(total);
+      console.log("[fee_debug] " + JSON.stringify({
+        order_id: order.id,
+        total_cents: total,
+        raw_FEE_BPS: FEE_BPS,
+        raw_FEE_FIXED_CENTS: FEE_FIXED,
+        used_bps: safeBps,
+        used_fixed_cents: safeFixed,
+        computed_fee_cents: fee,
+        computed_fee_dollars: (fee / 100).toFixed(2),
+        expected_7pct_cents: Math.round(total * 0.07),
+        expected_7pct_dollars: (Math.round(total * 0.07) / 100).toFixed(2),
+      }));
       const session = await stripe("checkout/sessions", {
         mode: "payment",
         line_items: lines.map(({ m, qty }) => ({
