@@ -283,6 +283,74 @@ Deno.serve(async (req) => {
       return json({ ok: true, refunded, refund_id: refundId, amount_cents: refunded ? order.total_cents : 0 });
     }
 
+    // ---- student: cancel their own order before the truck confirms ----
+    // refunds.html: "You can cancel for a full refund any time before the truck
+    // confirms your order." Identity is the device_key, the same trust model
+    // my_orders already runs on — students have no login.
+    if (action === "student_cancel_order") {
+      const { device_key, order_id } = body as { device_key?: string; order_id?: string };
+      if (!device_key || !order_id) return json({ error: "Missing order details" }, 400);
+
+      const { data: student } = await admin.from("students").select("id").eq("device_key", device_key).maybeSingle();
+      if (!student) return json({ error: "We don't recognise this device" }, 403);
+
+      const { data: order } = await admin.from("orders").select("*").eq("id", order_id).maybeSingle();
+      if (!order || order.student_id !== student.id) return json({ error: "Order not found" }, 404);
+      if (order.status === "cancelled") return json({ ok: true, refunded: false, already: true });
+
+      // Claim the row and test eligibility in ONE statement. This path refunds
+      // AFTER claiming, the reverse of the vendor path, and deliberately so: the
+      // student is only entitled to cancel while the order is still 'placed', so
+      // checking that first and cancelling second would let the truck confirm in
+      // the gap and leave us refunding food already on the grill.
+      const now = new Date().toISOString();
+      const { data: claimed } = await admin.from("orders")
+        .update({ status: "cancelled", cancelled_at: now, updated_at: now })
+        .eq("id", order.id).eq("status", "placed").select("id");
+      if (!claimed?.length) {
+        return json({ error: "The truck has already started this order — message them and we'll sort it out.", code: "too_late" }, 409);
+      }
+
+      let refunded = false, refundId: string | null = null;
+      if (order.payment_intent_id) {
+        try {
+          const refund = await stripe("refunds", {
+            payment_intent: order.payment_intent_id,
+            reverse_transfer: true,
+            refund_application_fee: true,
+            metadata: { order_id: order.id },
+          }, "POST", "refund_" + order.id);
+          refunded = true;
+          refundId = refund.id;
+          console.log("[refund]", order.id, refund.id, refund.status, order.total_cents);
+        } catch (e) {
+          const msg = (e as Error).message;
+          if (!/already been refunded/i.test(msg)) {
+            // The row is already cancelled by now, so swallowing this would leave
+            // a student out of pocket with nothing recording why. Make it loud in
+            // the logs AND on the order's own timeline so it can be found later.
+            console.error("[refund] STUDENT CANCEL REFUND FAILED", order.id, msg);
+            await admin.from("order_status_events").insert({
+              order_id: order.id, status: "cancelled",
+              note: `cancelled by student — REFUND FAILED, needs refunding by hand: ${msg}`,
+            });
+            return json({ error: "Your order is cancelled, but the refund didn't go through automatically. We've flagged it and will refund you by hand.", code: "refund_failed" }, 502);
+          }
+          refunded = true;
+        }
+      }
+      if (refundId) await admin.from("orders").update({ refund_id: refundId }).eq("id", order.id);
+
+      await admin.from("order_status_events").insert({
+        order_id: order.id,
+        status: "cancelled",
+        note: refunded
+          ? `cancelled by student — refunded $${(order.total_cents / 100).toFixed(2)}${refundId ? ` (${refundId})` : " (already refunded)"}`
+          : "cancelled by student — nothing to refund",
+      });
+      return json({ ok: true, refunded, refund_id: refundId, amount_cents: refunded ? order.total_cents : 0 });
+    }
+
     // ---- student: paid checkout ----
     if (action === "create_checkout") {
       const { device_key, student_name, phone, vendor_id, items } = body as {

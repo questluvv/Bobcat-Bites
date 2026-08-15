@@ -357,6 +357,21 @@ async function placeOrder() {
   } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Reserve order (preview)"; }
 }
 
+// Only offered while the order is still 'placed' — the refund policy allows a
+// free cancel right up until the truck confirms, and not after. The server
+// re-checks that rather than trusting this button, since the truck may confirm
+// between the render and the tap.
+async function studentCancel(id) {
+  if (!confirm("Cancel this order?\n\nYou'll be refunded in full. Card refunds can take 5-10 business days to appear.")) return;
+  try {
+    const r = await stripeApi({ action: "student_cancel_order", device_key: deviceKey, order_id: id });
+    toast(r.refunded ? `Order cancelled — ${money(r.amount_cents)} refunded` : "Order cancelled");
+  } catch (e) {
+    toast(e.message, "error");
+  }
+  loadOrders();
+}
+
 async function loadOrders() {
   try {
     const res = await api({ action: "my_orders", device_key: deviceKey });
@@ -443,7 +458,7 @@ function render() {
           <div class="muted">📍 ${esc(o.vendors?.default_location || "")} · ${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
           ${(o.order_items || []).map((i) => `<div class="item"><span>${i.quantity}× ${esc(i.item_name_snapshot)}</span><span>${money(i.unit_price_cents * i.quantity)}</span></div>`).join("")}
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
-          ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div>` : ""}
+          ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div><div style="text-align:center"><button class="link" style="color:var(--red)" onclick="studentCancel('${o.id}')">Cancel order</button></div>` : ""}
           ${o.status === "pending_payment" ? `<div class="banner">💳 Finishing payment… this updates on its own once Stripe confirms.</div>` : ""}
           ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd.text}</div><div class="muted" style="text-align:center;margin-bottom:6px">${etaMotto(cd.left)}</div>` : ""}
           ${o.status === "ready" ? `<div class="banner warn" style="font-weight:700">🎉 Ready! Show this code at the window:</div>` : ""}
