@@ -60,10 +60,17 @@ function form(params: Record<string, unknown>, prefix = "", out = new URLSearchP
   }
   return out;
 }
-async function stripe(path: string, params?: Record<string, unknown>, method = "POST") {
+async function stripe(path: string, params?: Record<string, unknown>, method = "POST", idempotencyKey?: string) {
+  const headers: Record<string, string> = {
+    Authorization: "Bearer " + STRIPE_KEY,
+    "Content-Type": "application/x-www-form-urlencoded",
+  };
+  // Stripe replays the original response for a repeated key rather than acting
+  // twice — the difference between a double-tapped Decline and a double refund.
+  if (idempotencyKey) headers["Idempotency-Key"] = idempotencyKey;
   const res = await fetch("https://api.stripe.com/v1/" + path, {
     method,
-    headers: { Authorization: "Bearer " + STRIPE_KEY, "Content-Type": "application/x-www-form-urlencoded" },
+    headers,
     body: method === "GET" ? undefined : form(params ?? {}),
   });
   const body = await res.json();
@@ -206,6 +213,64 @@ Deno.serve(async (req) => {
         transfers: account.capabilities?.transfers ?? "unknown",
         requirements_due: account.requirements?.currently_due ?? [],
       });
+    }
+
+    // ---- vendor: decline/cancel a paid order, refunding the student ----
+    // refunds.html promises "a full refund automatically when the truck declines
+    // or cancels your order", so cancelling and refunding have to be one
+    // operation. The vendor app routes its Decline/Cancel button here rather
+    // than writing status='cancelled' straight to the table, which would take
+    // the student's money and give nothing back.
+    if (action === "cancel_order") {
+      const user = await userFromReq(req);
+      if (!user) return json({ error: "Log in first" }, 401);
+      const vendor = await vendorForUser(user.id);
+      if (!vendor) return json({ error: "No truck registered" }, 400);
+      const orderId = body.order_id as string;
+      if (!orderId) return json({ error: "Missing order_id" }, 400);
+
+      const { data: order } = await admin.from("orders").select("*").eq("id", orderId).maybeSingle();
+      if (!order) return json({ error: "Order not found" }, 404);
+      if (order.vendor_id !== vendor.id) return json({ error: "Not your order" }, 403);
+      if (order.status === "picked_up") return json({ error: "That order was already picked up" }, 400);
+      if (order.status === "cancelled") return json({ ok: true, refunded: false, already: true });
+
+      let refunded = false, refundId: string | null = null;
+      if (order.payment_intent_id) {
+        // Both flags matter on a destination charge: reverse_transfer claws the
+        // money back out of the truck's connected account (without it the
+        // platform absorbs the refund), and refund_application_fee returns our
+        // 7% as well — a cancelled order must not earn the platform anything.
+        // Refund BEFORE touching the row: if the DB write then fails the order
+        // stays visible and the idempotency key makes the retry a no-op, which
+        // is the safe direction to fail in.
+        const refund = await stripe("refunds", {
+          payment_intent: order.payment_intent_id,
+          reverse_transfer: true,
+          refund_application_fee: true,
+          metadata: { order_id: order.id },
+        }, "POST", "refund_" + order.id);
+        refunded = true;
+        refundId = refund.id;
+        console.log("[refund]", order.id, refund.id, refund.status, order.total_cents);
+      }
+
+      const now = new Date().toISOString();
+      let { error } = await admin.from("orders")
+        .update({ status: "cancelled", cancelled_at: now, updated_at: now, refund_id: refundId })
+        .eq("id", order.id);
+      if (error) ({ error } = await admin.from("orders")
+        .update({ status: "cancelled", cancelled_at: now, updated_at: now }).eq("id", order.id));
+      if (error) throw new Error(error.message);
+
+      await admin.from("order_status_events").insert({
+        order_id: order.id,
+        status: "cancelled",
+        note: refunded
+          ? `cancelled by truck — refunded $${(order.total_cents / 100).toFixed(2)} (${refundId})`
+          : "cancelled by truck — nothing to refund",
+      });
+      return json({ ok: true, refunded, refund_id: refundId, amount_cents: refunded ? order.total_cents : 0 });
     }
 
     // ---- student: paid checkout ----
