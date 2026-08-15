@@ -140,7 +140,7 @@ async function login() {
 async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
 
 // ---------- push notifications ----------
-const VAPID_PUBLIC = "BOFY2-LTES_GjIzO3cKo0ziAG59PDy2LygHav14eLHDk1taPyk0LZPn6YMF2qMM4Svmnofg9hCSdasqy0R28v4s";
+const VAPID_PUBLIC = "BAJli-voLzABRywn6y_WlUpqNNbEqIHNyKe3BhSCUlujUGtrbcwXmVF_MDDENpGgosF9GSF3FoHciNPv9qMIq5M";
 function b64ToU8(s) {
   const pad = "=".repeat((4 - (s.length % 4)) % 4);
   const raw = atob((s + pad).replace(/-/g, "+").replace(/_/g, "/"));
