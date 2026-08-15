@@ -16,7 +16,7 @@
   * { box-sizing:border-box; margin:0; -webkit-tap-highlight-color:transparent; }
   body { font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif; background:var(--bg); color:var(--ink); padding-bottom:84px; }
   header { background:#fff; color:var(--ink); padding:14px 18px; position:sticky; top:0; z-index:10; display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid var(--blue-line); }
-  header h1 { font-size:18px; color:var(--blue-dark); } header h1 span { color:var(--red); }
+  header h1 { font-size:18px; color:var(--blue-dark); display:flex; align-items:center; gap:8px; } header h1 span { color:var(--red); }
   main { max-width:520px; margin:0 auto; padding:16px; }
   .card { background:#fff; border-radius:16px; padding:16px; margin-bottom:12px; box-shadow:0 1px 2px rgba(23,58,110,.06), 0 4px 14px rgba(23,58,110,.05); border:1px solid #eaf1fa; }
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
@@ -67,10 +67,19 @@
   .toast { position:fixed; left:50%; bottom:94px; transform:translateX(-50%) translateY(12px); background:var(--ink); color:#fff; padding:12px 18px; border-radius:12px; font-size:14px; font-weight:600; box-shadow:0 8px 24px rgba(0,0,0,.2); opacity:0; transition:opacity .2s, transform .2s; z-index:100; max-width:86%; text-align:center; pointer-events:none; }
   .toast.show { opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.error { background:var(--red); }
+  /* Bobcat mark: original artwork drawn for this app. Deliberately NOT derived
+     from any university logo — a modified trademark is still a derivative of it,
+     and this carries no such risk. Inline SVG so it needs no request, works
+     offline in the PWA, and recolours from the CSS variables above. */
+  .bobcat { height:1.15em; width:auto; overflow:visible; flex:none; }
+  .bobcat .tail { transform-origin:16px 33px; animation:bb-swish 2.1s ease-in-out infinite; }
+  @keyframes bb-swish { 0% { transform:rotate(-10deg); } 50% { transform:rotate(16deg); } 100% { transform:rotate(-10deg); } }
+  /* Vestibular disorders make looping motion genuinely unpleasant; honour the OS setting. */
+  @media (prefers-reduced-motion: reduce) { .bobcat .tail { animation:none; } }
 </style>
 </head>
 <body>
-<header><h1>🚚 Bobcat <span>Bites</span> · Vendor</h1><button class="small b-done" id="logoutBtn" style="display:none" onclick="logout()">Log out</button></header>
+<header><h1><svg class="bobcat" viewBox="0 0 68 58" role="img" aria-label="Bobcat mascot"><path class="tail" d="M15 33 C 10 29, 8 25, 9 20" fill="none" stroke="var(--blue)" stroke-width="7" stroke-linecap="round"/><ellipse cx="24" cy="37" rx="15.5" ry="13" fill="var(--blue)"/><ellipse cx="39" cy="31" rx="9" ry="10.5" fill="var(--blue)"/><ellipse cx="17" cy="48" rx="8.5" ry="4" fill="var(--blue-dark)"/><rect x="38" y="33" width="8.5" height="18" rx="4.25" fill="var(--blue-dark)"/><path d="M37 14 L 38.5 1 L 46 10.5 Z" fill="var(--blue)"/><path d="M50 10 L 59 1.5 L 58 15 Z" fill="var(--blue)"/><path d="M39.5 12 L 40.5 5.5 L 44 10 Z" fill="var(--red-light)"/><path d="M52 11 L 56.5 6 L 56 13.5 Z" fill="var(--red-light)"/><circle cx="47" cy="22" r="12" fill="var(--blue)"/><ellipse cx="51" cy="26" rx="5.5" ry="4.2" fill="#fff"/><path d="M52.6 23.6 L 56 23.6 L 54.3 26 Z" fill="var(--red)"/><circle cx="48" cy="18" r="2" fill="var(--ink)"/><circle cx="21" cy="34" r="1.6" fill="var(--blue-dark)"/><circle cx="27" cy="40" r="1.6" fill="var(--blue-dark)"/><circle cx="18" cy="41" r="1.4" fill="var(--blue-dark)"/></svg> Bobcat <span>Bites</span> · Vendor</h1><button class="small b-done" id="logoutBtn" style="display:none" onclick="logout()">Log out</button></header>
 <main id="view"></main>
 <nav id="tabs" style="display:none">
   <button id="nav-orders" class="active" onclick="go('orders')"><span class="ico">🔔</span>Orders<span id="orderBadge"></span></button>
