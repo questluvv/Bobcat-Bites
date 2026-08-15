@@ -130,7 +130,10 @@ async function forgotPassword() {
   // gets one fixed message: saying "no account with that email" would let anyone
   // probe which trucks are registered.
   if (error && /rate|limit|too many/i.test(error.message)) {
-    return toast("Too many reset emails just now — give it a minute and try again.", "error");
+    // Don't promise "a minute": the binding limit is usually the project-wide
+    // hourly email quota, not the 60s per-address cooldown, and telling an owner
+    // to retry shortly just makes them burn attempts and distrust the app.
+    return toast("Reset emails are rate-limited right now. If one already arrived, use that link — otherwise try again later.", "error");
   }
   if (error) console.error("[reset]", error.message);
   toast("If that email has an account, a reset link is on its way.");
