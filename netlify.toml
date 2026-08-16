@@ -1,3 +1,6 @@
+# INERT — the site moved from Netlify to Cloudflare Workers, so nothing in this
+# file takes effect. The live equivalents now live in `_headers`. Kept only as
+# a record of the original intent; edit `_headers` instead.
 # Bobcat Bites — Netlify config
 # Static site: no build step, files are served straight from the repo root.
 
