@@ -40,12 +40,23 @@ const admin = createClient(
   Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!,
 );
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type",
-};
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+// Pinned to the production origins. Defence in depth, not a boundary: CORS
+// constrains browsers, not curl, so it never stands in for the auth checks below.
+const ALLOWED_ORIGINS = new Set([
+  "https://bobcat-bites.com",
+  "https://www.bobcat-bites.com",
+  // The Workers subdomain still serves the same app. Drop once it is retired.
+  "https://bobcat-bites.questchester05.workers.dev",
+]);
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : "https://bobcat-bites.com",
+    // Without Vary, a cache could hand one origin's response to another.
+    "Vary": "Origin",
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type",
+  };
+}
 
 function form(params: Record<string, unknown>, prefix = "", out = new URLSearchParams()): URLSearchParams {
   for (const [k, v] of Object.entries(params)) {
@@ -121,6 +132,12 @@ async function vendorForUser(userId: string) {
 }
 
 Deno.serve(async (req) => {
+  // Per request so the echoed origin matches the caller; a module-level object
+  // would be shared across concurrent requests.
+  const CORS = corsFor(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   const url = new URL(req.url);
 
@@ -358,6 +375,9 @@ Deno.serve(async (req) => {
         items: { menu_item_id: string; quantity: number }[];
       };
       if (!device_key || !student_name?.trim() || !vendor_id || !items?.length) return json({ error: "Missing order details" }, 400);
+      // Bound the array: every element becomes a row insert, so an unbounded
+      // list is a cheap way to make one request do unbounded database work.
+      if (!Array.isArray(items) || items.length > 20) return json({ error: "1-20 items per order" }, 400);
 
       const { data: vendor } = await admin.from("vendors").select("*").eq("id", vendor_id).maybeSingle();
       if (!vendor || vendor.status !== "approved") return json({ error: "Truck not available" }, 400);
@@ -427,6 +447,10 @@ Deno.serve(async (req) => {
 
     return json({ error: "Unknown action" }, 400);
   } catch (e) {
-    return json({ error: (e as Error).message }, 400);
+    // Deliberate refusals above are returned via json() and keep their wording.
+    // Anything reaching here is unexpected — Stripe or Postgres text, which can
+    // name internals — so it is logged and the caller gets something generic.
+    console.error("[stripe] unhandled:", (e as Error).message);
+    return json({ error: "Something went wrong. Try again in a moment." }, 400);
   }
 });

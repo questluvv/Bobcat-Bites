@@ -36,12 +36,23 @@ if (VAPID_READY) {
 
 const db = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
 
-const CORS = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-notify-secret",
-};
-const json = (body: unknown, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+// Pinned to the production origins. Defence in depth, not a boundary: CORS
+// constrains browsers, not curl, so it never stands in for the auth checks below.
+const ALLOWED_ORIGINS = new Set([
+  "https://bobcat-bites.com",
+  "https://www.bobcat-bites.com",
+  // The Workers subdomain still serves the same app. Drop once it is retired.
+  "https://bobcat-bites.questchester05.workers.dev",
+]);
+function corsFor(req: Request): Record<string, string> {
+  const origin = req.headers.get("Origin") ?? "";
+  return {
+    "Access-Control-Allow-Origin": ALLOWED_ORIGINS.has(origin) ? origin : "https://bobcat-bites.com",
+    // Without Vary, a cache could hand one origin's response to another.
+    "Vary": "Origin",
+    "Access-Control-Allow-Headers": "authorization, apikey, content-type, x-notify-secret",
+  };
+}
 
 function toE164US(raw?: string | null): string | null {
   if (!raw) return null;
@@ -127,6 +138,12 @@ async function pushToSubscriptions(
 }
 
 Deno.serve(async (req: Request) => {
+  // Per request so the echoed origin matches the caller. Matters most for
+  // /subscribe, which is public and unauthenticated.
+  const CORS = corsFor(req);
+  const json = (body: unknown, status = 200) =>
+    new Response(JSON.stringify(body), { status, headers: { ...CORS, "Content-Type": "application/json" } });
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: CORS });
   if (req.method !== "POST") return new Response("POST only", { status: 405, headers: CORS });
 
@@ -157,7 +174,9 @@ Deno.serve(async (req: Request) => {
     });
     if (error) {
       console.error("[subscribe] insert failed:", error.message);
-      return json({ error: error.message }, 400);
+      // This route is public and unauthenticated; a raw Postgres message here
+      // would name columns and constraints to anyone who pokes at it.
+      return json({ error: "Couldn't save the subscription" }, 400);
     }
     return json({ ok: true, subscribed: true });
   }

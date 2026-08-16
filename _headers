@@ -1,0 +1,54 @@
+# Cloudflare `_headers` — replaces what netlify.toml used to do.
+#
+# The move to Cloudflare Workers left netlify.toml inert, which silently dropped
+# BOTH the security headers and the cache rules. The cache half matters as much
+# as the security half: a stale sw.js leaves students running old code long after
+# a deploy, and you end up debugging a version that is not live.
+#
+# Paths are listed explicitly rather than relying on extension globbing, so the
+# matching behaviour is unambiguous.
+
+/*
+  X-Content-Type-Options: nosniff
+  X-Frame-Options: DENY
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# The service worker decides how every notification renders and controls the
+# offline cache. If a CDN pins an old copy, students keep running old code.
+/sw.js
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The manifests drive Add to Home Screen, which is what unlocks web push on iOS.
+/manifest-student.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
+/manifest-vendor.webmanifest
+  Cache-Control: public, max-age=0, must-revalidate
+
+# The app shell is hand-edited HTML; a stale copy is the same class of bug as a
+# stale worker, so revalidate rather than cache hard.
+/
+  Cache-Control: public, max-age=0, must-revalidate
+/index.html
+  Cache-Control: public, max-age=0, must-revalidate
+/vendor_app.html
+  Cache-Control: public, max-age=0, must-revalidate
+/admin_app.html
+  Cache-Control: public, max-age=0, must-revalidate
+/contact.html
+  Cache-Control: public, max-age=0, must-revalidate
+/terms.html
+  Cache-Control: public, max-age=0, must-revalidate
+/privacy.html
+  Cache-Control: public, max-age=0, must-revalidate
+/refunds.html
+  Cache-Control: public, max-age=0, must-revalidate
+
+# Icons are content-stable and safe to cache aggressively.
+/icon-192.png
+  Cache-Control: public, max-age=604800
+/icon-512.png
+  Cache-Control: public, max-age=604800
+/icon-vendor-192.png
+  Cache-Control: public, max-age=604800
+/icon-vendor-512.png
+  Cache-Control: public, max-age=604800
