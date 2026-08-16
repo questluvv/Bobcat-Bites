@@ -374,22 +374,21 @@ async function placeOrder() {
     items: Object.entries(state.cart).map(([menu_item_id, quantity]) => ({ menu_item_id, quantity })),
   };
   localStorage.setItem("bb_name", details.student_name);
-  if (stripeEnabled) {
-    try {
-      const res = await stripeApi({ action: "create_checkout", ...details });
-      location.href = res.url; // off to Stripe Checkout; webhook flips the order to "placed"
-      return;
-    } catch (e) {
-      if (e.code !== "no_card_payments") { toast(e.message, "error"); btn.disabled = false; btn.textContent = "Pay with card"; return; }
-      // truck hasn't finished Stripe onboarding — fall through to demo pay
-    }
-  }
+  // Stripe Checkout is the ONLY way to create an order. There used to be a
+  // fallback here to the api function's place_order, used when a truck had not
+  // finished Stripe onboarding — but that action took no payment at all, so
+  // anyone who read this file could POST a real ticket onto a truck's screen and
+  // have food cooked for free. The action is gone server-side; this is the
+  // client half of closing that hole. A truck without a payout account now gets
+  // a plain refusal instead of a free order.
   try {
-    const res = await api({ action: "place_order", ...details });
-    requestNotifyPermission();
-    go("orders");
-    toast("Order placed! Code " + res.pickup_code);
-  } catch (e) { toast(e.message, "error"); btn.disabled = false; btn.textContent = stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Reserve order (preview)"; }
+    const res = await stripeApi({ action: "create_checkout", ...details });
+    location.href = res.url; // off to Stripe Checkout; webhook flips the order to "placed"
+  } catch (e) {
+    toast(e.message, "error");
+    btn.disabled = false;
+    btn.textContent = `Pay ${money(cartTotal())} with card`;
+  }
 }
 
 // Only offered while the order is still 'placed' — the refund policy allows a
@@ -478,8 +477,8 @@ function render() {
       <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">
         <input id="s_phone" type="tel" placeholder="Phone (optional)">
-        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">🎉 Pre-launch preview — card payments open when we go live for Fall 2026. No card is charged.</div>`}
-        <button class="primary" type="submit" id="placeBtn">${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Reserve order (preview)"}</button>
+        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">🎉 Pre-launch preview — ordering opens when card payments go live for Fall 2026.</div>`}
+        <button class="primary" type="submit" id="placeBtn"${stripeEnabled ? "" : " disabled"}>${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Ordering opens at launch"}</button>
       </form>`;
   }
   if (state.screen === "orders") {
