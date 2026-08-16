@@ -57,27 +57,43 @@
   .sitefoot a { color:var(--muted); margin:0 6px; text-decoration:none; white-space:nowrap; }
   .sitefoot a:hover { color:var(--blue); text-decoration:underline; }
   .sitefoot-note { margin-top:6px; font-size:11px; opacity:.85; }
+  /* the 6px anchor margin above is for the policy link row; inside the credit
+     sentence it detaches the punctuation from the link text. */
+  .sitefoot-note a { margin:0; }
   .empty { text-align:center; color:var(--muted); padding:40px 0; }
-  /* Bobcat mark: original artwork drawn for this app. Deliberately NOT derived
-     from any university logo — a modified trademark is still a derivative of it,
-     and this carries no such risk. Inline SVG so it needs no request, works
-     offline in the PWA, and recolours from the CSS variables above. */
-  .bobcat { height:1.15em; width:auto; overflow:visible; flex:none; }
-  .bobcat .tail { transform-origin:16px 33px; animation:bb-swish 2.1s ease-in-out infinite; }
-  @keyframes bb-swish { 0% { transform:rotate(-10deg); } 50% { transform:rotate(16deg); } 100% { transform:rotate(-10deg); } }
-  /* Vestibular disorders make looping motion genuinely unpleasant; honour the OS setting. */
+  /* Bobcat mark. Cat silhouette by game-icons.net under CC BY 3.0 — credited in
+     the footer, which that licence requires. Recolours via currentColor.
+     The swish is deliberately uneven: a symmetrical sine reads mechanical, so the
+     keyframes loiter, flick once, and settle, on a long cycle. */
+  .bobcat { height:1.25em; width:auto; color:var(--blue); flex:none; }
+  .bobcat .tail { transform-origin:80px 400px; transform-box:view-box; animation:bb-swish 5s ease-in-out infinite; }
+  @keyframes bb-swish {
+    0%,100% { transform:rotate(-5deg); }
+    14% { transform:rotate(1deg); }
+    28% { transform:rotate(-3deg); }
+    44% { transform:rotate(4deg); }
+    54% { transform:rotate(7deg); }
+    64% { transform:rotate(2deg); }
+    80% { transform:rotate(-6deg); }
+    92% { transform:rotate(-2deg); }
+  }
+  /* Looping motion is genuinely unpleasant with a vestibular disorder. */
   @media (prefers-reduced-motion: reduce) { .bobcat .tail { animation:none; } }
 </style>
 </head>
 <body>
-<header><h1><svg class="bobcat" viewBox="0 0 68 58" role="img" aria-label="Bobcat mascot"><path class="tail" d="M15 33 C 10 29, 8 25, 9 20" fill="none" stroke="var(--blue)" stroke-width="7" stroke-linecap="round"/><ellipse cx="24" cy="37" rx="15.5" ry="13" fill="var(--blue)"/><ellipse cx="39" cy="31" rx="9" ry="10.5" fill="var(--blue)"/><ellipse cx="17" cy="48" rx="8.5" ry="4" fill="var(--blue-dark)"/><rect x="38" y="33" width="8.5" height="18" rx="4.25" fill="var(--blue-dark)"/><path d="M37 14 L 38.5 1 L 46 10.5 Z" fill="var(--blue)"/><path d="M50 10 L 59 1.5 L 58 15 Z" fill="var(--blue)"/><path d="M39.5 12 L 40.5 5.5 L 44 10 Z" fill="var(--red-light)"/><path d="M52 11 L 56.5 6 L 56 13.5 Z" fill="var(--red-light)"/><circle cx="47" cy="22" r="12" fill="var(--blue)"/><ellipse cx="51" cy="26" rx="5.5" ry="4.2" fill="#fff"/><path d="M52.6 23.6 L 56 23.6 L 54.3 26 Z" fill="var(--red)"/><circle cx="48" cy="18" r="2" fill="var(--ink)"/><circle cx="21" cy="34" r="1.6" fill="var(--blue-dark)"/><circle cx="27" cy="40" r="1.6" fill="var(--blue-dark)"/><circle cx="18" cy="41" r="1.4" fill="var(--blue-dark)"/></svg> Bobcat <span>Bites</span></h1><span class="muted">UC Merced</span></header>
+<header><h1><!-- Cat silhouette from game-icons.net, CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
+     Credited in the site footer. Drawn twice through complementary clip windows:
+     the body copy is fixed, the tail copy rotates. The clip sits on a STATIC outer
+     group because a clip-path on a rotating group turns with it, which swings the
+     window open and lets the head bleed into the tail area. --><svg class="bobcat" viewBox="0 0 512 545" role="img" aria-label="Bobcat mascot"><defs><path id="bb-cat" fill="currentColor" d="m463.46 37.008l-30.694 50.738l-7.043-2.28c-27.146-8.797-71.525-7.15-97.6.11L321.22 87.5l-28.68-48.543c-33.63 69.254-32.264 117.56-14.79 148.574c18.71 33.208 57.378 49.09 99.117 48.574c48.743-.606 88.968-19.665 107.035-54.194c16.918-32.332 15.684-80.456-20.443-144.902zM323.935 137.594c18.45.1 29.36 15.338 31.462 36.644c-37.11 17.91-53.963 3.398-61.173-26.545c11.382-7.063 21.324-10.144 29.71-10.1zm109.26 0c8.385-.045 18.328 3.036 29.71 10.1c-7.21 29.942-24.064 44.454-61.174 26.544c2.104-21.306 13.014-36.545 31.463-36.644zm-293.553 50.96q-1.839-.014-3.66.018c-30.175.536-56.142 10.59-75.743 26.574c-43.444 35.43-57.27 100.752-12.824 166.192c20.293 33.995 44.432 54.24 70.797 64.187c32.85 12.395 66.655 8.823 99.94 4.114s65.854-10.63 96.896-8.42c31.04 2.212 62.09 10.18 90.505 41.165c19.374 21.125 46.887-1.627 23.82-24.156c-35.024-34.207-72.527-47.42-109.377-50.04s-72.2 4.698-104.207 9.228s-60.272 6.552-84.558-2.61c-14.39-5.43-28.308-14.802-41.55-31.142h351.744c13.673-52.293 14.867-106.368 1.873-142.072c-19.765 8.49-42.412 12.9-66.2 13.197h-.002c-29.85.37-59.458-6.925-82.907-22.823a426 426 0 0 0-14.292 9.685l-5.734 4.057l-5.49-4.382c-46.63-37.2-91.028-52.48-129.03-52.773z"/><clipPath id="bb-clip-body"><rect x="0" y="0" width="512" height="388"/></clipPath><clipPath id="bb-clip-tail"><rect x="0" y="388" width="512" height="157"/></clipPath></defs><g clip-path="url(#bb-clip-tail)"><g class="tail"><use href="#bb-cat"/></g></g><g clip-path="url(#bb-clip-body)"><use href="#bb-cat"/></g></svg> Bobcat <span>Bites</span></h1><span class="muted">UC Merced</span></header>
 <main id="view"></main>
 <!-- Policy links must be reachable from the landing page, not just by URL:
      Stripe's risk review flagged "no verifiable contact or policy information".
      Sits above the fixed bottom nav (body already has padding-bottom for it). -->
 <div class="sitefoot">
   <a href="contact.html">Contact</a>·<a href="terms.html">Terms</a>·<a href="refunds.html">Refunds</a>·<a href="privacy.html">Privacy</a>
-  <div class="sitefoot-note">Independent student-built service. Not affiliated with UC Merced.</div>
+  <div class="sitefoot-note">Independent student-built service. Not affiliated with UC Merced.<br>Cat mark by <a href="https://game-icons.net/" target="_blank" rel="noopener">game-icons.net</a>, <a href="https://creativecommons.org/licenses/by/3.0/" target="_blank" rel="noopener">CC BY 3.0</a>.</div>
 </div>
 <nav>
   <button id="nav-trucks" class="active" onclick="go('trucks')"><span class="ico">🚚</span>Trucks</button>
