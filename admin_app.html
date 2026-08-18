@@ -50,34 +50,93 @@ function toast(msg, kind) {
   toastTimer = setTimeout(() => el.classList.remove("show"), 2800);
 }
 
+// Errors carry enough shape for the caller to tell "wrong PIN" apart from "the
+// request never reached the server". A CORS block and an offline device both
+// surface as a bare TypeError out of fetch(), whose message ("Load failed" in
+// Safari, "Failed to fetch" in Chrome) reads exactly like a rejected PIN. That
+// ambiguity is what cost a debugging session on this app, so it is resolved here
+// once rather than at each call site.
 async function api(payload) {
-  const r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
+  let r;
+  try {
+    r = await fetch(API, { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
+  } catch (cause) {
+    console.error("[admin] fetch never completed for", API, "— CORS block or no network:", cause);
+    const err = new Error("Can't reach the server — check you're on bobcat-bites.com and online.");
+    err.kind = "network";
+    throw err;
+  }
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || "Request failed");
+  if (!r.ok) {
+    const err = new Error(j.error || `Request failed (${r.status})`);
+    err.kind = "http";
+    err.status = r.status;
+    if (typeof j.retryAfter === "number") err.retryAfter = j.retryAfter;
+    console.error("[admin] API error", r.status, j);
+    throw err;
+  }
   return j;
 }
 
+// The server allows 5 admin attempts per 10 minutes and then locks the IP out
+// for 30. It reports the wait inside the error string; if it ever also sends a
+// numeric retryAfter, prefer that and say it in minutes.
+function failureMessage(e) {
+  if (e.status === 429 && typeof e.retryAfter === "number") {
+    const mins = Math.ceil(e.retryAfter / 60);
+    return `Too many attempts — locked out for about ${mins} minute${mins === 1 ? "" : "s"}.`;
+  }
+  return e.message;
+}
+
+// Latched while a request is in flight: every double-submit burns one of the
+// five attempts before the 30-minute lockout, so an impatient second tap is
+// expensive here in a way it is not on a normal form.
+let unlocking = false;
 async function unlock() {
-  pin = $("pin").value.trim();
-  try { await load(); sessionStorage.setItem("bb_admin_pin", pin); }
-  catch (e) { toast(e.message, "error"); pin = ""; }
+  if (unlocking) return;
+  const input = $("pin");
+  const btn = $("unlockBtn");
+  pin = (input?.value ?? "").trim();
+  if (!pin) { toast("Enter the admin PIN", "error"); return; }
+  unlocking = true;
+  if (input) input.disabled = true;
+  if (btn) { btn.disabled = true; btn.textContent = "Checking…"; }
+  try {
+    await load();
+    sessionStorage.setItem("bb_admin_pin", pin);
+  } catch (e) {
+    toast(failureMessage(e), "error");
+    pin = "";
+    sessionStorage.removeItem("bb_admin_pin");
+    render(); // rebuild the gate; without this the old markup stays, holding a
+              // dead disabled input with the rejected PIN still in it
+  } finally {
+    unlocking = false;
+  }
 }
 async function load() {
   const res = await api({ action: "admin_list", pin });
   vendors = res.vendors; render();
 }
 async function setStatus(id, status) {
-  try { await api({ action: "admin_set_status", pin, vendor_id: id, status }); load(); }
-  catch (e) { toast(e.message, "error"); }
+  try {
+    await api({ action: "admin_set_status", pin, vendor_id: id, status });
+    await load();
+  } catch (e) {
+    toast(failureMessage(e), "error");
+    // A 401 here means the session PIN is no longer good. Staying on the vendor
+    // list would leave every button silently failing, so drop back to the gate.
+    if (e.status === 401) { pin = ""; sessionStorage.removeItem("bb_admin_pin"); render(); }
+  }
 }
 
 function render() {
   const v = $("view");
-  if (!pin || !vendors.length && !vendors._loaded) { /* fallthrough below handles */ }
   if (!pin) {
     v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();unlock()"><h3 style="margin-bottom:10px">Enter admin PIN</h3>
       <input id="pin" type="password" inputmode="numeric" placeholder="PIN" autofocus>
-      <button class="primary" type="submit">Unlock</button></form></div>`;
+      <button id="unlockBtn" class="primary" type="submit">Unlock</button></form></div>`;
     return;
   }
   const pending = vendors.filter((x) => x.status === "pending");
@@ -96,7 +155,15 @@ function render() {
     ${pending.length ? `<h3 style="margin:6px 0">⏳ Awaiting approval (${pending.length})</h3>` + pending.map(card).join("") : ""}
     ${rest.map(card).join("") || '<div class="card muted">No vendors yet.</div>'}`;
 }
-if (pin) load().catch(() => { pin = ""; render(); });
+if (pin) load().catch((e) => {
+  // Restoring a stored PIN can fail for two very different reasons; a silent
+  // reset to the gate makes an outage look like an expired session.
+  console.warn("[admin] stored PIN did not restore the session:", e.message, e);
+  if (e.kind === "network") toast(e.message, "error");
+  pin = "";
+  sessionStorage.removeItem("bb_admin_pin");
+  render();
+});
 render();
 </script>
 </body>
