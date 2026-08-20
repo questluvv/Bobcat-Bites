@@ -195,6 +195,18 @@ async function loadVendor() {
   state.vendor = data || null;
 }
 
+// An operator who is certain the password is right, on a device where a
+// password manager filled the field for them, has no way to see that something
+// else is in the box. That is not a hypothetical: the same account signed in
+// from a phone with a keychain entry and failed from a laptop where it was
+// typed by hand. Let them look.
+function togglePw() {
+  const i = $("pw"), b = $("pwToggle");
+  if (!i) return;
+  const show = i.type === "password";
+  i.type = show ? "text" : "password";
+  if (b) b.textContent = show ? "Hide" : "Show";
+}
 function readCreds() {
   const email = $("email").value.trim(), pw = $("pw").value;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Type your email in the Email box first.", "error"); return null; }
@@ -616,7 +628,10 @@ function render() {
   if (!state.user) {
     v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();login()"><h2>Truck owner sign in</h2>
       <input id="email" type="email" placeholder="Email" autocomplete="username">
-      <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password">
+      <div style="position:relative">
+        <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password" style="padding-right:64px">
+        <button id="pwToggle" class="small" type="button" onclick="togglePw()" style="position:absolute;right:6px;top:6px;background:none;color:var(--blue);padding:6px 8px">Show</button>
+      </div>
       <button id="loginBtn" class="primary" type="submit">Log in</button>
       <div style="height:8px"></div>
       <button id="signupBtn" class="ghost" type="button" onclick="signup()">Create account</button>
