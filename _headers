@@ -42,6 +42,8 @@
   Cache-Control: public, max-age=0, must-revalidate
 /refunds.html
   Cache-Control: public, max-age=0, must-revalidate
+/404.html
+  Cache-Control: public, max-age=0, must-revalidate
 
 # Menu photos never change in place — a new photo means a new filename — so they
 # can be cached hard. They are also the heaviest thing on the menu screen, which
