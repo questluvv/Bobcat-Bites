@@ -363,10 +363,35 @@ const payoutNeed = (key) =>
 async function fillPayoutCard() {
   try {
     const { enabled } = await stripeApi({ action: "status" });
-    if (!enabled) return;
+    if (!enabled) {
+      // Same "[payouts] card hidden:" prefix as every other exit below, so there
+      // is exactly one string to search for when this card goes missing,
+      // whichever of the four ways it failed.
+      console.warn("[payouts] card hidden: the stripe function reports card payments are off (STRIPE_SECRET_KEY unset)");
+      return;
+    }
     const st = await stripeApi({ action: "vendor_payout_status" });
     const el = $("payoutCard"); // looked up after the awaits — render may have rebuilt the view
-    if (!el) return;
+    if (!el) {
+      // Leaving the My Truck tab mid-request is ordinary and not worth a warning.
+      // Still being on it and finding no element is the bug: render() rebuilds
+      // #payoutCard as an empty hidden div, so a re-render that outran these two
+      // requests leaves nothing to fill — and this returned silently, which makes
+      // a perfectly healthy backend look broken.
+      if (state.screen === "truck") {
+        console.warn("[payouts] card hidden: #payoutCard was gone by the time the requests finished — a re-render outran them");
+      }
+      return;
+    }
+    // The inverse race, equally silent: we fill the card, then another render()
+    // swaps in a fresh empty hidden div and wipes it. Nothing throws, nothing
+    // logs, the card just never appears. Check shortly after whether the element
+    // we filled is still attached to the document.
+    setTimeout(() => {
+      if (state.screen === "truck" && !el.isConnected) {
+        console.warn("[payouts] card hidden: it was filled, then a re-render replaced #payoutCard before it could show");
+      }
+    }, 400);
     el.className = "card"; el.style.display = "";
     // "Active" needs all three: charges_enabled alone still leaves money stuck at
     // Stripe if transfers isn't live or payouts are on hold, and telling an
