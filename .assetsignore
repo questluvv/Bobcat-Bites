@@ -1,0 +1,29 @@
+# Files Wrangler must not upload to the public site.
+#
+# Stronger than the _redirects rules, which only hide a file that was published
+# anyway: anything listed here never reaches the edge at all. _redirects stays
+# in place as well, because it also covers the Netlify copy and gives a real
+# 404 page rather than a bare miss.
+#
+# Same syntax as .gitignore. Nothing the apps load at runtime is listed.
+
+# Full TypeScript source of the api, stripe and notify edge functions. These are
+# deployed to Supabase, never fetched by a browser.
+supabase/
+
+# Agent and tooling config that ships in the repo for local development.
+.mcp.json
+.claude/
+.agents/
+skills-lock.json
+.gitignore
+
+# Build config for the other two publishers; neither is used by this Worker.
+_config.yml
+netlify.toml
+wrangler.jsonc
+
+# Project documentation, not part of the app.
+README.md
+STRIPE-SETUP.md
+BOBCAT_1.pdf
