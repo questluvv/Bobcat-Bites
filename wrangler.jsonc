@@ -1,0 +1,24 @@
+// Cloudflare Worker config, pinned on purpose.
+//
+// Without this file `wrangler deploy` auto-detects the framework, and that
+// detection is fragile: adding _config.yml (which GitHub Pages needs, to keep
+// the edge function source out of the copy it publishes) made Wrangler decide
+// this was a Jekyll site. It set the build command to `npx bundle exec jekyll
+// build` — `bundle` is a Ruby tool, not an npm package — and every deploy died
+// with "npm error could not determine executable to run" before uploading
+// anything. The site silently went stale while main kept moving.
+//
+// So the settings are declared here instead of guessed. There is NO build step:
+// this is hand-written HTML/CSS/JS served straight from the repo root, which is
+// what the live site has always done. What must not be published is handled by
+// .assetsignore rather than by a build.
+{
+  "name": "bobcat-bites",
+  "compatibility_date": "2026-08-20",
+  "observability": { "enabled": true },
+  "assets": {
+    // The repo root. index.html, vendor_app.html, the icons, manifests, sw.js
+    // and pies/ all sit here, and _headers / _redirects are read from here too.
+    "directory": "."
+  }
+}
