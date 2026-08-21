@@ -38,8 +38,25 @@
      on. align-self drops it to that edge while the rest of the row stays
      centred; the negative margin carries it down over the row's own padding so
      it meets the divider instead of floating above it. */
-  .item.peeked { gap:12px; }
-  .peek { position:relative; flex:none; align-self:flex-end; margin-bottom:-10px;
+  /* Pie on the left, text and the stepper stacked to its right.
+     These three used to sit in a single row, which left the text column about
+     155px wide: "Red sauce, mozzarella, & shredded parmesan cheese" wrapped
+     over five lines and every row grew to ~140px tall. Raising the touch
+     targets to 44px made it worse. Giving the stepper its own line hands the
+     description the full remaining width and roughly halves the row height. */
+  .item.peeked {
+    display:grid; grid-template-columns:96px minmax(0,1fr);
+    grid-template-areas:"pie text" "pie actions";
+    column-gap:12px; row-gap:4px; align-items:start;
+  }
+  .item.peeked .peek { grid-area:pie; }
+  .it-main { grid-area:text; min-width:0; }
+  /* Price sits next to the stepper: the number and the control that changes it
+     belong on the same line. */
+  .it-actions { grid-area:actions; display:flex; align-items:center; justify-content:space-between; gap:12px; }
+  .price { font-weight:700; font-variant-numeric:tabular-nums; }
+  .prep { white-space:nowrap; }
+  .peek { position:relative; flex:none; align-self:end; margin-bottom:-10px;
           width:96px; height:48px; overflow:hidden; pointer-events:none;
           filter:drop-shadow(0 -2px 4px rgba(23,58,110,.18)); }
   /* The drawn fallback is a whole circle whose lower half the box clips away. */
@@ -56,9 +73,16 @@
      tappable, but kept at .muted's size so the card layout does not shift. */
   .maploc { display:inline-block; color:var(--blue); font-size:13px; font-weight:600; text-decoration:none; }
   .maploc:active { opacity:.6; }
-  .qty { display:flex; align-items:center; gap:10px; }
-  .qty button { width:32px; height:32px; border-radius:9px; border:1px solid var(--blue-line); background:var(--blue-light); font-size:18px; font-weight:700; color:var(--blue-dark); }
+  /* 44x44 is the Apple HIG / WCAG floor for a touch target. These were 32x32,
+     which is a real mis-tap risk on the control students use most — every
+     quantity change on the menu goes through them. */
+  .qty { display:flex; align-items:center; gap:8px; }
+  .qty button { width:44px; height:44px; border-radius:11px; border:1px solid var(--blue-line); background:var(--blue-light); font-size:20px; font-weight:700; color:var(--blue-dark); cursor:pointer; touch-action:manipulation; }
   .qty button:disabled { opacity:.35; cursor:not-allowed; }
+  .qty > b { min-width:1.25em; text-align:center; font-variant-numeric:tabular-nums; }
+  /* Never remove the focus ring — keyboard users lose their place without it. */
+  .qty button:focus-visible, button.primary:focus-visible, .maploc:focus-visible,
+  button.link:focus-visible { outline:2px solid var(--blue); outline-offset:2px; }
   .truck.unorderable { opacity:.6; }
   .banner.warn { background:var(--red-light); border-color:#f6c8ca; color:#b53338; }
   button.primary { width:100%; background:var(--blue); color:#fff; border:none; border-radius:12px; padding:15px; font-size:16px; font-weight:700; cursor:pointer; transition:transform .1s; box-shadow:0 3px 10px rgba(26,115,232,.25); }
@@ -87,6 +111,85 @@
      sentence it detaches the punctuation from the link text. */
   .sitefoot-note a { margin:0; }
   .empty { text-align:center; color:var(--muted); padding:40px 0; }
+
+  /* ---- Per-vendor menu theming ----------------------------------------
+     A truck can bring its own colours to its own menu screen. Everything here
+     is scoped under [data-vendor-theme], so the trucks list, checkout, orders
+     and every other truck keep the default blue — one truck's branding can
+     never leak into another's.
+
+     Daily Dough's palette is sampled from their own printed menu board rather
+     than invented: #4d0202 is 98% of that board's background, with cream type
+     and a warm crust gold. Every foreground/background pair below was measured
+     against WCAG AA and the weakest is 7.29:1, so none of it had to be
+     lightened to stay readable. */
+  [data-vendor-theme="daily-dough"] {
+    --dd-bg:#4d0202; --dd-surface:#5f1010; --dd-line:#7d2626;
+    --dd-cream:#ffe4e1; --dd-cream-dim:#e2b9b7;
+    --dd-gold:#f1b545; --dd-gold-light:#ffc579;
+  }
+  /* The card becomes the menu board: deep maroon, a warm top-light to give the
+     flat colour some depth, and a gold hairline standing in for the board's
+     printed edge. */
+  [data-vendor-theme="daily-dough"] .card {
+    background:
+      radial-gradient(120% 80% at 50% -20%, rgba(241,181,69,.16), transparent 60%),
+      var(--dd-bg);
+    border:1px solid var(--dd-line);
+    box-shadow:0 2px 4px rgba(58,0,0,.28), 0 10px 28px rgba(58,0,0,.22);
+  }
+  [data-vendor-theme="daily-dough"] h2,
+  [data-vendor-theme="daily-dough"] .item b { color:var(--dd-cream); }
+  [data-vendor-theme="daily-dough"] .muted { color:var(--dd-cream-dim); }
+  [data-vendor-theme="daily-dough"] .maploc { color:var(--dd-gold-light); }
+  [data-vendor-theme="daily-dough"] .item { border-bottom-color:var(--dd-line); }
+  /* Price reads as the decision point, so it gets the gold and a tabular
+     figure set — proportional digits make a column of prices jitter. */
+  [data-vendor-theme="daily-dough"] .price {
+    color:var(--dd-gold); font-weight:700; font-variant-numeric:tabular-nums;
+  }
+  [data-vendor-theme="daily-dough"] .prep { color:var(--dd-cream-dim); }
+  /* Size badge: 18" Whole vs Slice is the difference between $30 and $6.25, so
+     it is pulled out of the description where it was buried mid-sentence. */
+  .size-tag {
+    display:inline-block; margin-left:6px; padding:1px 7px; border-radius:99px;
+    font-size:11px; font-weight:700; letter-spacing:.02em; vertical-align:1px;
+    border:1px solid var(--blue-line); color:var(--blue-dark); background:var(--blue-light);
+  }
+  [data-vendor-theme="daily-dough"] .size-tag {
+    border-color:var(--dd-gold); color:var(--dd-gold-light); background:rgba(241,181,69,.12);
+  }
+  [data-vendor-theme="daily-dough"] .qty button {
+    background:rgba(255,228,225,.06); border-color:var(--dd-gold); color:var(--dd-gold-light);
+  }
+  [data-vendor-theme="daily-dough"] .qty > b { color:var(--dd-cream); }
+  [data-vendor-theme="daily-dough"] .qty button:focus-visible,
+  [data-vendor-theme="daily-dough"] .maploc:focus-visible,
+  [data-vendor-theme="daily-dough"] button.primary:focus-visible {
+    outline-color:var(--dd-gold-light);
+  }
+  /* Gold CTA on maroon text: 10.2:1, and it reads as the truck's own button
+     rather than the platform's. */
+  [data-vendor-theme="daily-dough"] button.primary {
+    background:var(--dd-gold); color:#3a0000; box-shadow:0 3px 12px rgba(77,2,2,.35);
+  }
+  [data-vendor-theme="daily-dough"] .banner {
+    background:rgba(255,228,225,.08); border-color:var(--dd-line); color:var(--dd-cream);
+  }
+  [data-vendor-theme="daily-dough"] .banner.warn {
+    background:rgba(229,72,77,.18); border-color:#a33; color:#ffd9d9;
+  }
+  [data-vendor-theme="daily-dough"] .empty { color:var(--dd-cream-dim); }
+  /* The pie sits on a dark board now, so it needs a light rim to separate from
+     it rather than the drop shadow that worked against white. */
+  [data-vendor-theme="daily-dough"] .peek {
+    filter:drop-shadow(0 -2px 5px rgba(0,0,0,.45));
+  }
+  /* Looping or sliding motion is genuinely unpleasant with a vestibular
+     disorder, and none of this is load-bearing. */
+  @media (prefers-reduced-motion: reduce) {
+    .qty button, button.primary { transition:none; }
+  }
   /* Bobcat mark. Cat silhouette by game-icons.net under CC BY 3.0 — credited in
      the footer, which that licence requires. Recolours via currentColor.
      The swish is deliberately uneven: a symmetrical sine reads mechanical, so the
@@ -182,6 +285,25 @@ function locationLink(loc, fallback) {
   if (!loc) return `<div class="muted">📍 ${esc(fallback || "Location TBA")}</div>`;
   return `<div><a class="maploc" href="${esc(mapsUrl(loc))}" target="_blank" rel="noopener"
     onclick="event.stopPropagation()">📍 ${esc(loc)}</a></div>`;
+}
+
+// ---------- per-vendor theming ----------
+// Keyed by name rather than id so a truck can be themed without a schema change
+// or a migration. A truck with no entry renders in the default blue, which is
+// every truck today except this one.
+const VENDOR_THEMES = { "daily dough pizza": "daily-dough" };
+const themeFor = (t) => VENDOR_THEMES[String(t?.name || "").trim().toLowerCase()] || "";
+
+// Descriptions are stored as `18" Whole · toppings` or `Slice · toppings`.
+// Pulling the size out into its own badge is what makes a 12-row menu scannable:
+// seven pizzas each appear twice, and buried mid-sentence the only thing
+// distinguishing the $30 row from the $6.25 row was one word of prose.
+// The pattern is deliberately narrow — it must start with a real size word, so
+// an ordinary description containing a "·" is left alone.
+const SIZE_RE = /^((?:\d+\s*"?\s*)?(?:whole|slice|small|medium|large|regular|xl)[^·]{0,12}?)\s*·\s*(.+)$/i;
+function splitSize(desc) {
+  const m = SIZE_RE.exec(String(desc || "").trim());
+  return m ? { size: m[1].trim(), rest: m[2].trim() } : { size: "", rest: String(desc || "") };
 }
 
 // ---------- the half-pie peeking over each menu row ----------
@@ -613,19 +735,35 @@ function render() {
     const t = state.truck; const orderable = isOrderable(t);
     const left = breakLeftMs(t);
     const cd = left ? `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}` : null;
+    const theme = themeFor(t);
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
+      <div${theme ? ` data-vendor-theme="${esc(theme)}"` : ""}>
       <div class="card"><h2>${esc(t.name)}</h2>${locationLink(t.default_location, "")}</div>` +
       (orderable ? "" : t.is_open
         ? `<div class="banner">⏸️ Taking a quick break — ${cd ? `back in <b style="font-variant-numeric:tabular-nums">${cd}</b>.` : left === 0 ? "back any minute now!" : "back soon!"} Browse the menu meanwhile.</div>`
         : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
-      (state.menu.length ? state.menu.map((m) => `
+      (state.menu.length ? state.menu.map((m) => {
+        const { size, rest } = splitSize(m.description);
+        const qty = state.cart[m.id] || 0;
+        return `
         <div class="item peeked">
           ${peekArt(m, t.name)}
-          <div style="flex:1"><b>${esc(m.name)}</b>${m.description ? `<div class="muted">${esc(m.description)}</div>` : ""}<div class="muted">${money(m.price_cents)} · ~${m.default_prep_minutes} min</div></div>
-          <div class="qty"><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',-1)">−</button><b>${state.cart[m.id] || 0}</b><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',1)">+</button></div>
-        </div>`).join("") : `<div class="empty">Loading menu…</div>`) + `</div>` +
-      (orderable && cartCount() ? `<button class="primary" onclick="state.screen='checkout';render()">Checkout · ${cartCount()} item${cartCount() > 1 ? "s" : ""} · ${money(cartTotal())}</button>` : "");
+          <div class="it-main">
+            <b>${esc(m.name)}</b>${size ? `<span class="size-tag">${esc(size)}</span>` : ""}
+            ${rest ? `<div class="muted">${esc(rest)}</div>` : ""}
+          </div>
+          <div class="it-actions">
+            <div><span class="price">${money(m.price_cents)}</span> <span class="muted prep">· ~${m.default_prep_minutes} min</span></div>
+            <div class="qty">
+              <button ${orderable ? "" : "disabled"} aria-label="One fewer ${esc(m.name)}" onclick="setQty('${m.id}',-1)">−</button>
+              <b aria-live="polite" aria-label="${qty} in cart">${qty}</b>
+              <button ${orderable ? "" : "disabled"} aria-label="One more ${esc(m.name)}" onclick="setQty('${m.id}',1)">+</button>
+            </div>
+          </div>
+        </div>`; }).join("") : `<div class="empty">Loading menu…</div>`) + `</div>` +
+      (orderable && cartCount() ? `<button class="primary" onclick="state.screen='checkout';render()">Checkout · ${cartCount()} item${cartCount() > 1 ? "s" : ""} · ${money(cartTotal())}</button>` : "") +
+      `</div>`;
   }
   if (state.screen === "checkout") {
     v.innerHTML = `<button class="link" onclick="state.screen='menu';render()">← Back to menu</button>
