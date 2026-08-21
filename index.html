@@ -30,20 +30,28 @@
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
   .item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #eef3fa; }
   .item:last-child { border-bottom:none; }
-  /* Half a pie peeking over the top of the row. The medallion is a full circle
-     drawn at 2x the box height with overflow hidden, so only the upper
-     hemisphere shows and the row's top edge reads as the horizon it rises over.
-     The padding-top on the row is what reserves the band it rises into —
-     without it the disc would collide with the item above. */
-  .item.peeked { padding-top:34px; position:relative; }
-  .peek { position:absolute; top:2px; left:0; width:56px; height:28px; overflow:hidden; pointer-events:none;
-          filter:drop-shadow(0 -2px 3px rgba(23,58,110,.16)); }
+  /* A big half-pie rising off the bottom of the row, the way Daily Dough's own
+     menu board frames them: the pie sits ON the divider line and comes up to
+     about mid-row, with the item's text alongside it. The medallion is a full
+     circle drawn at 2x the box height with overflow hidden, so only the upper
+     hemisphere shows and the row's bottom edge reads as the surface it rests
+     on. align-self drops it to that edge while the rest of the row stays
+     centred; the negative margin carries it down over the row's own padding so
+     it meets the divider instead of floating above it. */
+  .item.peeked { gap:12px; }
+  .peek { position:relative; flex:none; align-self:flex-end; margin-bottom:-10px;
+          width:96px; height:48px; overflow:hidden; pointer-events:none;
+          filter:drop-shadow(0 -2px 4px rgba(23,58,110,.18)); }
   /* The drawn fallback is a whole circle whose lower half the box clips away. */
-  .peek > svg { display:block; width:56px; height:56px; border-radius:50%; }
+  .peek > svg { display:block; width:96px; height:96px; border-radius:50%; }
   /* A photo is already shot as a dome on the truck's own menu board, so it
      fills the visible box directly rather than being a circle with half of it
-     thrown away — which would waste most of the pixels on something clipped. */
-  .peek > img { display:block; width:56px; height:28px; object-fit:cover; border-radius:28px 28px 0 0; }
+     thrown away — which would waste most of the pixels on something clipped.
+     It sits ON TOP of the drawing: if the photo fails to load its onerror
+     removes it and the drawn pie underneath is revealed, instead of the menu
+     showing a row of broken-image glyphs. */
+  .peek > img { position:absolute; inset:0; display:block; width:96px; height:48px;
+                object-fit:cover; border-radius:48px 48px 0 0; }
   /* Free-text locations open in a maps app. Styled as a link so it is obviously
      tappable, but kept at .muted's size so the card layout does not shift. */
   .maploc { display:inline-block; color:var(--blue); font-size:13px; font-weight:600; text-decoration:none; }
@@ -250,23 +258,36 @@ function peekRand(str) {
   for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
   return () => { h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; };
 }
+// The drawn pie is ALWAYS rendered, and a photo is layered over it rather than
+// replacing it. If the photo 404s — a vendor pastes a bad URL, or a path is
+// wrong for the origin the app is being served from — onerror drops the <img>
+// and the drawing underneath shows through. Swapping instead of layering would
+// leave the browser's broken-image glyph sitting on the menu, which is what a
+// root-relative /pies/... path did on the GitHub Pages copy, where the app
+// lives under a subdirectory and the src resolved to the domain root.
 function peekArt(m, truckName) {
-  if (m.photo_url) return `<div class="peek"><img src="${esc(m.photo_url)}" alt="" loading="lazy"></div>`;
+  const photo = m.photo_url
+    ? `<img src="${esc(m.photo_url)}" alt="" loading="lazy" onerror="this.remove()">`
+    : "";
+  return `<div class="peek">${drawnPie(m, truckName)}${photo}</div>`;
+}
+// Returns the bare <svg>; peekArt owns the wrapper so the photo can layer over.
+function drawnPie(m, truckName) {
   const text = `${m.name} ${m.description || ""} ${truckName || ""}`;
   const dish = DISH_GLYPHS.find(([re]) => re.test(m.name + " " + (m.description || "")));
   if (dish && !/pizza|pie|margherita|pepperoni|calzone|slice/i.test(text)) {
-    return `<div class="peek"><svg viewBox="0 0 100 100" role="img" aria-hidden="true">
+    return `<svg viewBox="0 0 100 100" role="img" aria-hidden="true">
       <circle cx="50" cy="50" r="48" fill="#fff" stroke="#e6eef8" stroke-width="3"/>
-      <text x="50" y="42" text-anchor="middle" font-size="34">${dish[1]}</text></svg></div>`;
+      <text x="50" y="42" text-anchor="middle" font-size="34">${dish[1]}</text></svg>`;
   }
   const kind = PIE_KINDS.find((k) => k.m.test(text));
   const rand = peekRand(m.id || m.name);
   const slots = PEEK_SLOTS.slice().sort(() => rand() - 0.5).slice(0, kind.n);
-  return `<div class="peek"><svg viewBox="0 0 100 100" role="img" aria-hidden="true">
+  return `<svg viewBox="0 0 100 100" role="img" aria-hidden="true">
     <circle cx="50" cy="50" r="48" fill="#e0a760"/>
     <circle cx="50" cy="50" r="41" fill="#c8452f"/>
     <circle cx="50" cy="50" r="38" fill="${kind.cheese}"/>
-    ${slots.map(([x, y], i) => kind.top(x, y, i)).join("")}</svg></div>`;
+    ${slots.map(([x, y], i) => kind.top(x, y, i)).join("")}</svg>`;
 }
 
 let toastTimer;
