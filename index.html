@@ -30,6 +30,32 @@
   h2 { font-size:17px; margin-bottom:10px; } h3 { font-size:15px; }
   .item { display:flex; justify-content:space-between; align-items:center; padding:10px 0; border-bottom:1px solid #eef3fa; }
   .item:last-child { border-bottom:none; }
+  /* A big half-pie rising off the bottom of the row, the way Daily Dough's own
+     menu board frames them: the pie sits ON the divider line and comes up to
+     about mid-row, with the item's text alongside it. The medallion is a full
+     circle drawn at 2x the box height with overflow hidden, so only the upper
+     hemisphere shows and the row's bottom edge reads as the surface it rests
+     on. align-self drops it to that edge while the rest of the row stays
+     centred; the negative margin carries it down over the row's own padding so
+     it meets the divider instead of floating above it. */
+  .item.peeked { gap:12px; }
+  .peek { position:relative; flex:none; align-self:flex-end; margin-bottom:-10px;
+          width:96px; height:48px; overflow:hidden; pointer-events:none;
+          filter:drop-shadow(0 -2px 4px rgba(23,58,110,.18)); }
+  /* The drawn fallback is a whole circle whose lower half the box clips away. */
+  .peek > svg { display:block; width:96px; height:96px; border-radius:50%; }
+  /* A photo is already shot as a dome on the truck's own menu board, so it
+     fills the visible box directly rather than being a circle with half of it
+     thrown away — which would waste most of the pixels on something clipped.
+     It sits ON TOP of the drawing: if the photo fails to load its onerror
+     removes it and the drawn pie underneath is revealed, instead of the menu
+     showing a row of broken-image glyphs. */
+  .peek > img { position:absolute; inset:0; display:block; width:96px; height:48px;
+                object-fit:cover; border-radius:48px 48px 0 0; }
+  /* Free-text locations open in a maps app. Styled as a link so it is obviously
+     tappable, but kept at .muted's size so the card layout does not shift. */
+  .maploc { display:inline-block; color:var(--blue); font-size:13px; font-weight:600; text-decoration:none; }
+  .maploc:active { opacity:.6; }
   .qty { display:flex; align-items:center; gap:10px; }
   .qty button { width:32px; height:32px; border-radius:9px; border:1px solid var(--blue-line); background:var(--blue-light); font-size:18px; font-weight:700; color:var(--blue-dark); }
   .qty button:disabled { opacity:.35; cursor:not-allowed; }
@@ -132,6 +158,137 @@ function breakLeftMs(t) {
 const $ = (id) => document.getElementById(id);
 const money = (c) => "$" + (c / 100).toFixed(2);
 const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (m) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[m]));
+
+// ---------- opening a truck's spot in a maps app ----------
+// default_location is free text and the range in the database is wide: a full
+// street address ("1997 W Olive Ave Merced, CA 95348"), a campus building
+// ("Yablokoff-Wallace Dining Center"), and two bare letters ("DC"). Handing "DC"
+// to a maps app straight sends a hungry student to Washington, so anything that
+// doesn't already name Merced gets the campus appended and resolves on the
+// right side of the country.
+const NAMES_CITY = /\bmerced\b/i;
+function mapsUrl(loc) {
+  const q = NAMES_CITY.test(loc) ? loc : loc + ", UC Merced, Merced, CA 95343";
+  // maps.apple.com works in any browser, but on Android it is a web page while
+  // Google Maps is the app people actually have — so pick by platform.
+  return /iPhone|iPad|iPod|Macintosh/.test(navigator.userAgent)
+    ? "https://maps.apple.com/?q=" + encodeURIComponent(q)
+    : "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+}
+// stopPropagation matters on the trucks list: the whole card is a click target
+// that opens the menu, so without it tapping the address opens the truck
+// instead of the map.
+function locationLink(loc, fallback) {
+  if (!loc) return `<div class="muted">📍 ${esc(fallback || "Location TBA")}</div>`;
+  return `<div><a class="maploc" href="${esc(mapsUrl(loc))}" target="_blank" rel="noopener"
+    onclick="event.stopPropagation()">📍 ${esc(loc)}</a></div>`;
+}
+
+// ---------- the half-pie peeking over each menu row ----------
+// photo_url is the real answer and wins whenever a truck has set one. It is
+// null for every item in the database today, though, so a menu that only
+// rendered photos would show nothing at all. The fallback draws the item from
+// its own name: toppings key off words in the name, description and truck
+// name, so a Margherita gets basil and mozzarella while a pepperoni gets discs.
+// Only the upper hemisphere is ever visible, so every topping sits above the
+// equator — anything below y=50 is drawn and then clipped away for nothing.
+const PEEK_SLOTS = [[50, 20], [30, 26], [70, 26], [38, 40], [62, 40], [20, 40], [80, 40]];
+// ORDER MATTERS — the first regex to match wins, so the most specific pies go
+// first. Daily Dough's real menu is the test case: "Triple Threat" lists
+// pepperoni AND ham, so it has to be caught by /bacon/ before the pepperoni and
+// hawaiian rules see it; "Saucy Buffalo" lists onions, so buffalo has to come
+// before the veggie rule. Every kind is exercised by name in the test suite.
+const PIE_KINDS = [
+  // Saucy Buffalo — buffalo chicken, jalapeños, onion, orange sauce drizzle.
+  { m: /buffalo|jalape/i, cheese: "#f0b44a", n: 5,
+    top: (x, y, i) => i % 2
+      ? `<circle cx="${x}" cy="${y}" r="5.4" fill="#4e9a3f"/><circle cx="${x}" cy="${y}" r="2.4" fill="#dff0d0"/>`
+      : `<rect x="${x - 5.5}" y="${y - 4}" width="11" height="8" rx="3" fill="#e8dcc0"/><rect x="${x - 5.5}" y="${y - 4}" width="11" height="8" rx="3" fill="#e2762e" opacity=".55"/>` },
+  // Triple Threat — pepperoni + bacon + ham together.
+  { m: /triple threat|bacon/i, cheese: "#f3c159", n: 6,
+    top: (x, y, i) => i % 3 === 0
+      ? `<circle cx="${x}" cy="${y}" r="7" fill="#c0392b"/><circle cx="${x}" cy="${y}" r="7" fill="none" stroke="#8e2b20" stroke-width="1.5" opacity=".55"/>`
+      : i % 3 === 1
+      ? `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>`
+      : `<path d="M${x - 6} ${y + 2} q3 -5 6 0 q3 5 6 0" fill="none" stroke="#9b5b3a" stroke-width="3.4" stroke-linecap="round"/>` },
+  { m: /pepperoni|salami|meat|sausage|supreme/i, cheese: "#f3c159", n: 5,
+    top: (x, y) => `<circle cx="${x}" cy="${y}" r="7.5" fill="#c0392b"/><circle cx="${x}" cy="${y}" r="7.5" fill="none" stroke="#8e2b20" stroke-width="1.6" opacity=".55"/>` },
+  { m: /margherita|basil|caprese|marinara/i, cheese: "#f7d9a4", n: 4,
+    top: (x, y) => `<circle cx="${x}" cy="${y}" r="6.5" fill="#fffaf2"/><ellipse cx="${x + 7}" cy="${y - 5}" rx="6" ry="3.2" fill="#3f8e3f" transform="rotate(-25 ${x + 7} ${y - 5})"/>` },
+  { m: /hawaiian|pineapple/i, cheese: "#f7d9a4", n: 5,
+    top: (x, y, i) => i % 2
+      ? `<circle cx="${x}" cy="${y}" r="5.6" fill="#f2c14e"/><circle cx="${x}" cy="${y}" r="2.4" fill="#fbe6a8"/>`
+      : `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>` },
+  // Veggie Garden — red onion, bell pepper, mushroom, black olive, spinach.
+  { m: /veg|garden|spinach|bell pepper|onion/i, cheese: "#f3c159", n: 6,
+    top: (x, y, i) => [
+      `<rect x="${x - 6}" y="${y - 2.6}" width="12" height="5.2" rx="2.6" fill="#3f8e3f"/>`,
+      `<circle cx="${x}" cy="${y}" r="5.2" fill="#333a4a"/><circle cx="${x}" cy="${y}" r="2.1" fill="#f3c159"/>`,
+      `<ellipse cx="${x}" cy="${y - 1}" rx="6" ry="4.2" fill="#b98d63"/>`,
+      `<path d="M${x - 6} ${y} a6 6 0 0 1 12 0" fill="none" stroke="#9b7fc4" stroke-width="2.6"/>`,
+    ][i % 4] },
+  { m: /mushroom|truffle/i, cheese: "#f3c159", n: 4,
+    top: (x, y) => `<ellipse cx="${x}" cy="${y - 1}" rx="6.5" ry="4.4" fill="#b98d63"/><rect x="${x - 1.8}" y="${y + 1}" width="3.6" height="4.4" rx="1.4" fill="#e3c9a8"/>` },
+  { m: /olive/i, cheese: "#f3c159", n: 5,
+    top: (x, y) => `<circle cx="${x}" cy="${y}" r="5.4" fill="#333a4a"/><circle cx="${x}" cy="${y}" r="2.2" fill="#f3c159"/>` },
+  { m: /ham/i, cheese: "#f7d9a4", n: 5,
+    top: (x, y) => `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>` },
+  // Cheesy Melt, and the catch-all for any other pie: browned blistered spots.
+  { m: /./, cheese: "#f3c159", n: 4,
+    top: (x, y) => `<ellipse cx="${x}" cy="${y}" rx="5.6" ry="4.2" fill="#e8a93f" opacity=".85"/>` },
+];
+// Non-pizza items get a plate with a glyph instead of a pie — pretending a
+// shake is a pizza looks broken, and every truck here is not a pizzeria.
+const DISH_GLYPHS = [
+  [/shake|smoothie|malt|horchata|soda|lemonade|drink|juice|coffee/i, "🥤"],
+  [/pasta|spaghetti|noodle|linguine|penne/i, "🍝"],
+  [/burrito|taco|quesadilla|wrap/i, "🌯"],
+  [/burger|cheeseburger/i, "🍔"],
+  [/nacho|mac ?& ?cheese|mac and cheese|queso/i, "🧀"],
+  [/shrimp|fish|salmon/i, "🍤"],
+  [/bowl|rice|teriyaki/i, "🍚"],
+  [/fries|tots/i, "🍟"], [/salad|greens/i, "🥗"], [/wing|chicken/i, "🍗"],
+  [/sandwich|sub|hoagie/i, "🥪"], [/dessert|cookie|brownie|cake/i, "🍪"],
+];
+// Positions must not move between renders — the menu re-renders on every tap of
+// a quantity button, and toppings that reshuffle each time look like a glitch.
+// So the slot order is a deterministic shuffle keyed by the item's own id.
+function peekRand(str) {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) { h ^= str.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return () => { h ^= h << 13; h >>>= 0; h ^= h >>> 17; h ^= h << 5; h >>>= 0; return h / 4294967296; };
+}
+// The drawn pie is ALWAYS rendered, and a photo is layered over it rather than
+// replacing it. If the photo 404s — a vendor pastes a bad URL, or a path is
+// wrong for the origin the app is being served from — onerror drops the <img>
+// and the drawing underneath shows through. Swapping instead of layering would
+// leave the browser's broken-image glyph sitting on the menu, which is what a
+// root-relative /pies/... path did on the GitHub Pages copy, where the app
+// lives under a subdirectory and the src resolved to the domain root.
+function peekArt(m, truckName) {
+  const photo = m.photo_url
+    ? `<img src="${esc(m.photo_url)}" alt="" loading="lazy" onerror="this.remove()">`
+    : "";
+  return `<div class="peek">${drawnPie(m, truckName)}${photo}</div>`;
+}
+// Returns the bare <svg>; peekArt owns the wrapper so the photo can layer over.
+function drawnPie(m, truckName) {
+  const text = `${m.name} ${m.description || ""} ${truckName || ""}`;
+  const dish = DISH_GLYPHS.find(([re]) => re.test(m.name + " " + (m.description || "")));
+  if (dish && !/pizza|pie|margherita|pepperoni|calzone|slice/i.test(text)) {
+    return `<svg viewBox="0 0 100 100" role="img" aria-hidden="true">
+      <circle cx="50" cy="50" r="48" fill="#fff" stroke="#e6eef8" stroke-width="3"/>
+      <text x="50" y="42" text-anchor="middle" font-size="34">${dish[1]}</text></svg>`;
+  }
+  const kind = PIE_KINDS.find((k) => k.m.test(text));
+  const rand = peekRand(m.id || m.name);
+  const slots = PEEK_SLOTS.slice().sort(() => rand() - 0.5).slice(0, kind.n);
+  return `<svg viewBox="0 0 100 100" role="img" aria-hidden="true">
+    <circle cx="50" cy="50" r="48" fill="#e0a760"/>
+    <circle cx="50" cy="50" r="41" fill="#c8452f"/>
+    <circle cx="50" cy="50" r="38" fill="${kind.cheese}"/>
+    ${slots.map(([x, y], i) => kind.top(x, y, i)).join("")}</svg>`;
+}
 
 let toastTimer;
 function toast(msg, kind) {
@@ -349,7 +506,7 @@ async function openTruck(id) {
   clearInterval(state.tickTimer); clearInterval(state.truckTimer);
   state.tickTimer = setInterval(renderIfCounting, 1000);
   state.truckTimer = setInterval(refreshTruck, 10000);
- const { data, error } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
+ const { data, error } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes,photo_url").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
 }
@@ -448,7 +605,7 @@ function render() {
       (!state.trucksLoaded ? `<div class="empty">Loading trucks…</div>` :
       state.trucks.length ? state.trucks.map((t) => `
         <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
-          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div><div class="muted">📍 ${esc(t.default_location || "Location TBA")}</div>${breakLeftMs(t) ? `<div class="muted">⏸️ Back in ~${Math.max(1, Math.ceil(breakLeftMs(t) / 60000))} min</div>` : ""}</div>
+          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div>${locationLink(t.default_location)}${breakLeftMs(t) ? `<div class="muted">⏸️ Back in ~${Math.max(1, Math.ceil(breakLeftMs(t) / 60000))} min</div>` : ""}</div>
           <span class="pill ${isOrderable(t) ? "open" : t.is_open ? "soon" : "closed"}">${isOrderable(t) ? "Open" : t.is_open ? "Back soon" : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
@@ -457,13 +614,14 @@ function render() {
     const left = breakLeftMs(t);
     const cd = left ? `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}` : null;
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
-      <div class="card"><h2>${esc(t.name)}</h2><div class="muted">📍 ${esc(t.default_location || "")}</div></div>` +
+      <div class="card"><h2>${esc(t.name)}</h2>${locationLink(t.default_location, "")}</div>` +
       (orderable ? "" : t.is_open
         ? `<div class="banner">⏸️ Taking a quick break — ${cd ? `back in <b style="font-variant-numeric:tabular-nums">${cd}</b>.` : left === 0 ? "back any minute now!" : "back soon!"} Browse the menu meanwhile.</div>`
         : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
       (state.menu.length ? state.menu.map((m) => `
-        <div class="item">
+        <div class="item peeked">
+          ${peekArt(m, t.name)}
           <div style="flex:1"><b>${esc(m.name)}</b>${m.description ? `<div class="muted">${esc(m.description)}</div>` : ""}<div class="muted">${money(m.price_cents)} · ~${m.default_prep_minutes} min</div></div>
           <div class="qty"><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',-1)">−</button><b>${state.cart[m.id] || 0}</b><button ${orderable ? "" : "disabled"} onclick="setQty('${m.id}',1)">+</button></div>
         </div>`).join("") : `<div class="empty">Loading menu…</div>`) + `</div>` +
@@ -489,7 +647,7 @@ function render() {
         const cd = o.status === "confirmed" ? countdownFor(o) : null;
         return `<div class="card">
           <div style="display:flex;justify-content:space-between;align-items:center"><h3>${esc(o.vendors?.name || "Truck")}</h3><span class="pill ${o.status}">${o.status.replace("_", " ")}</span></div>
-          <div class="muted">📍 ${esc(o.vendors?.default_location || "")} · ${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
+          ${locationLink(o.vendors?.default_location, "")}<div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
           ${(o.order_items || []).map((i) => `<div class="item"><span>${i.quantity}× ${esc(i.item_name_snapshot)}</span><span>${money(i.unit_price_cents * i.quantity)}</span></div>`).join("")}
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
           ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div><div style="text-align:center"><button class="link" style="color:var(--red)" onclick="studentCancel('${o.id}')">Cancel order</button></div>` : ""}
