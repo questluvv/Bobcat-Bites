@@ -185,7 +185,23 @@ Deno.serve(async (req) => {
   const action = body.action as string;
 
   try {
-    if (action === "status") return json({ enabled: !!STRIPE_KEY, app_url: APP_URL, webhook_secret_set: !!WEBHOOK_SECRET });
+    // key_mode is the sk_ prefix, nothing more — no part of the secret is
+    // exposed. It exists because the go-live swap has to move STRIPE_SECRET_KEY
+    // and STRIPE_WEBHOOK_SECRET together: a live key with a test endpoint's
+    // whsec_ takes the student's money and never promotes the order out of
+    // 'pending_payment', so the truck never sees the ticket. Without this you
+    // only learn which mode you are in by losing a real order. Read it right
+    // after the swap — it must say "live" before a real card is used.
+    if (action === "status") {
+      return json({
+        enabled: !!STRIPE_KEY,
+        app_url: APP_URL,
+        webhook_secret_set: !!WEBHOOK_SECRET,
+        key_mode: STRIPE_KEY.startsWith("sk_live_") ? "live"
+                : STRIPE_KEY.startsWith("sk_test_") ? "test"
+                : STRIPE_KEY ? "unknown" : null,
+      });
+    }
     if (!STRIPE_KEY) return json({ error: "Card payments aren't set up yet" }, 400);
 
     // ---- vendor: create/resume Stripe Express onboarding ----
