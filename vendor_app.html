@@ -195,31 +195,101 @@ async function loadVendor() {
   state.vendor = data || null;
 }
 
+// An operator who is certain the password is right, on a device where a
+// password manager filled the field for them, has no way to see that something
+// else is in the box. That is not a hypothetical: the same account signed in
+// from a phone with a keychain entry and failed from a laptop where it was
+// typed by hand. Let them look.
+function togglePw() {
+  const i = $("pw"), b = $("pwToggle");
+  if (!i) return;
+  const show = i.type === "password";
+  i.type = show ? "text" : "password";
+  if (b) b.textContent = show ? "Hide" : "Show";
+}
 function readCreds() {
   const email = $("email").value.trim(), pw = $("pw").value;
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast("Type your email in the Email box first.", "error"); return null; }
   if (pw.length < 6) { toast("Password needs at least 6 characters.", "error"); return null; }
   return { email, pw };
 }
+// A fetch that never completes rejects with a bare TypeError whose message is
+// "Load failed" on iOS Safari and "Failed to fetch" on Chrome. Shown raw to a
+// truck owner mid-signup that is not a diagnosis, it is a dead end — it reads
+// like the app rejected them rather than like the request never left the phone.
+function isNetworkError(e) {
+  return e instanceof TypeError || /load failed|failed to fetch|network|connection/i.test(e?.message ?? "");
+}
+const NETWORK_MSG = "Can't reach the server — check your connection and that you're on bobcat-bites.com.";
+
+// Both buttons latch while a request is in flight. Signup is the expensive one:
+// a double-tap fires two createUser calls, the first succeeds and the second
+// comes back 409 "already has an account", so the operator sees a failure for
+// an account that was in fact just created for them.
+let authBusy = false;
+async function withAuthButton(btnId, label, fn) {
+  if (authBusy) return;
+  authBusy = true;
+  const btn = $(btnId);
+  const prev = btn?.textContent;
+  if (btn) { btn.disabled = true; btn.textContent = label; }
+  try { await fn(); }
+  finally {
+    authBusy = false;
+    const b = $(btnId); // render() may have replaced it
+    if (b) { b.disabled = false; if (prev) b.textContent = prev; }
+  }
+}
+
 async function signup() {
   const c = readCreds(); if (!c) return;
-  try {
-    // Server-side signup: account is created pre-confirmed (no confirmation email needed)
-    const r = await fetch(SUPABASE_URL + "/functions/v1/api", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY },
-      body: JSON.stringify({ action: "vendor_signup", email: c.email, password: c.pw }),
-    });
-    const j = await r.json().catch(() => ({}));
-    if (!r.ok) return toast(j.error || "Signup failed", "error");
-    const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
-    if (error) return toast("Account created — now log in: " + error.message, "error");
-  } catch (e) { toast("Signup failed: " + e.message, "error"); }
+  await withAuthButton("signupBtn", "Creating…", async () => {
+    let r, j;
+    try {
+      // Server-side signup: account is created pre-confirmed (no confirmation email needed)
+      r = await fetch(SUPABASE_URL + "/functions/v1/api", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY },
+        body: JSON.stringify({ action: "vendor_signup", email: c.email, password: c.pw }),
+      });
+      j = await r.json().catch(() => ({}));
+    } catch (e) {
+      console.error("[signup] request never completed:", e);
+      return toast(isNetworkError(e) ? NETWORK_MSG : "Signup failed: " + e.message, "error");
+    }
+    if (!r.ok) {
+      console.warn("[signup] server said", r.status, j);
+      return toast(j.error || `Signup failed (${r.status})`, "error");
+    }
+    // The account exists from here on. Anything that fails below is a login
+    // problem, not a signup problem, and must not read as "signup failed" —
+    // that sends the operator back to Create account, which can only 409 now.
+    try {
+      const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
+      if (error) {
+        console.warn("[signup] account created but auto-login failed:", error.message, error);
+        return toast("Account created. Tap Log in to continue." + (isNetworkError(error) ? "" : ` (${error.message})`), "error");
+      }
+    } catch (e) {
+      console.warn("[signup] account created but auto-login threw:", e);
+      return toast("Account created. Tap Log in to continue.", "error");
+    }
+  });
 }
 async function login() {
   const c = readCreds(); if (!c) return;
-  const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
-  if (error) return toast(error.message, "error");
+  await withAuthButton("loginBtn", "Signing in…", async () => {
+    try {
+      const { error } = await sb.auth.signInWithPassword({ email: c.email, password: c.pw });
+      if (error) {
+        console.warn("[login] failed:", error.message, error);
+        return toast(isNetworkError(error) ? NETWORK_MSG : error.message, "error");
+      }
+    } catch (e) {
+      console.error("[login] threw:", e);
+      toast(isNetworkError(e) ? NETWORK_MSG : e.message, "error");
+    }
+  });
 }
 async function logout() { clearInterval(state.pollTimer); await sb.auth.signOut(); state.vendor = null; render(); }
 
@@ -312,7 +382,13 @@ async function fillPayoutCard() {
       : !st.details_submitted
       ? `<b>\ud83d\udcb8 Payouts: almost there</b><div class="muted" style="margin-bottom:10px">Stripe still needs a few details before card orders can pay out.</div><button class="primary" onclick="openPayouts()">Finish payout setup</button>`
       : `<b>\ud83d\udcb8 Payouts: under review</b><div class="muted" style="margin-bottom:10px">You've sent Stripe everything \u2014 they're verifying it now, which usually takes a business day. ${st.charges_enabled ? "Card orders still work in the meantime; the money is held and released once this clears." : "Card orders are paused until this clears."}</div><button class="ghost" onclick="openPayouts()">Check with Stripe</button>`;
-  } catch (e) { /* function not deployed yet \u2014 keep hidden */ }
+  } catch (e) {
+    // The card stays hidden either way, but the reason must not. This catch
+    // used to swallow everything — a missing STRIPE_SECRET_KEY, an auth
+    // failure and a CORS block all looked identical to "not deployed yet",
+    // and that silence has already caused two misdiagnoses on this project.
+    console.warn("[payouts] card hidden:", e.message, e);
+  }
 }
 async function openPayouts() {
   try { const { url } = await stripeApi({ action: "vendor_onboard" }); location.href = url; }
@@ -552,10 +628,13 @@ function render() {
   if (!state.user) {
     v.innerHTML = `<div class="gate"><form class="card" style="width:100%" onsubmit="event.preventDefault();login()"><h2>Truck owner sign in</h2>
       <input id="email" type="email" placeholder="Email" autocomplete="username">
-      <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password">
-      <button class="primary" type="submit">Log in</button>
+      <div style="position:relative">
+        <input id="pw" type="password" placeholder="Password (6+ chars)" autocomplete="current-password" style="padding-right:64px">
+        <button id="pwToggle" class="small" type="button" onclick="togglePw()" style="position:absolute;right:6px;top:6px;background:none;color:var(--blue);padding:6px 8px">Show</button>
+      </div>
+      <button id="loginBtn" class="primary" type="submit">Log in</button>
       <div style="height:8px"></div>
-      <button class="ghost" type="button" onclick="signup()">Create account</button>
+      <button id="signupBtn" class="ghost" type="button" onclick="signup()">Create account</button>
       <div style="text-align:center;margin-top:10px"><button class="small b-done" type="button" onclick="forgotPassword()" style="background:none;color:var(--blue)">Forgot password?</button></div>
       <p class="muted" style="margin-top:10px">New here? Fill in email + password above, then hit Create account — you'll be logged in instantly.</p></form></div>`;
     return;
