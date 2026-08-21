@@ -43,6 +43,12 @@
 /refunds.html
   Cache-Control: public, max-age=0, must-revalidate
 
+# Menu photos never change in place — a new photo means a new filename — so they
+# can be cached hard. They are also the heaviest thing on the menu screen, which
+# is the screen a hungry student stares at, so a cache miss is felt.
+/pies/*
+  Cache-Control: public, max-age=604800
+
 # Icons are content-stable and safe to cache aggressively.
 /icon-192.png
   Cache-Control: public, max-age=604800
