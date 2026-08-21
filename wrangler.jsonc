@@ -18,7 +18,14 @@
   "observability": { "enabled": true },
   "assets": {
     // The repo root. index.html, vendor_app.html, the icons, manifests, sw.js
-    // and pies/ all sit here, and _headers / _redirects are read from here too.
-    "directory": "."
+    // and pies/ all sit here, and _headers is read from here too.
+    "directory": ".",
+    // Serve 404.html on a miss. This replaces the `_redirects` file, which was
+    // removed: its rules used the 404 status code, which Cloudflare Pages
+    // supports and Workers does not, and every build since that file appeared
+    // had failed. Nothing is lost by dropping it — .assetsignore keeps the
+    // private files out of the upload entirely, so they 404 by simply not
+    // existing, which is stronger than redirecting a file that shipped anyway.
+    "not_found_handling": "404-page"
   }
 }
