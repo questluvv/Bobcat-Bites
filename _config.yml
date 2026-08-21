@@ -1,0 +1,20 @@
+# GitHub Pages (Jekyll) build config.
+#
+# This exists for ONE reason: to keep non-app files out of the copy published at
+# questluvv.github.io/Bobcat-Bites. The `_redirects` file blocks them on
+# Cloudflare and Netlify, but GitHub Pages ignores `_redirects` entirely, so
+# without this the full source of every edge function stays readable there.
+#
+# `exclude` drops paths from the published output. Jekyll already skips anything
+# beginning with `_` or `.`, which covers _headers, _redirects and .mcp.json —
+# these are the ones it would otherwise publish.
+#
+# Nothing the apps load is listed. The HTML carries no Liquid tags ({{ }} / {% %}),
+# so Jekyll copies the pages through byte-for-byte rather than rendering them.
+exclude:
+  - supabase        # full TypeScript source of the api, stripe and notify functions
+  - README.md
+  - STRIPE-SETUP.md
+  - netlify.toml    # config for a host this project no longer publishes to
+  - BOBCAT_1.pdf
+  - skills-lock.json
