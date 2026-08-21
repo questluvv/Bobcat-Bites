@@ -38,8 +38,12 @@
   .item.peeked { padding-top:34px; position:relative; }
   .peek { position:absolute; top:2px; left:0; width:56px; height:28px; overflow:hidden; pointer-events:none;
           filter:drop-shadow(0 -2px 3px rgba(23,58,110,.16)); }
-  .peek > * { display:block; width:56px; height:56px; border-radius:50%; }
-  .peek img { object-fit:cover; }
+  /* The drawn fallback is a whole circle whose lower half the box clips away. */
+  .peek > svg { display:block; width:56px; height:56px; border-radius:50%; }
+  /* A photo is already shot as a dome on the truck's own menu board, so it
+     fills the visible box directly rather than being a circle with half of it
+     thrown away — which would waste most of the pixels on something clipped. */
+  .peek > img { display:block; width:56px; height:28px; object-fit:cover; border-radius:28px 28px 0 0; }
   /* Free-text locations open in a maps app. Styled as a link so it is obviously
      tappable, but kept at .muted's size so the card layout does not shift. */
   .maploc { display:inline-block; color:var(--blue); font-size:13px; font-weight:600; text-decoration:none; }
