@@ -7,6 +7,15 @@
 #
 # Same syntax as .gitignore. Nothing the apps load at runtime is listed.
 
+# The assets directory is the repo root, so the repository's own metadata sits
+# inside it. Wrangler is believed to skip these, but "believed to" is not a
+# guarantee worth taking with .git: publishing it would expose the entire commit
+# history, every branch and every file ever committed, at a guessable path.
+# Listed explicitly so the outcome does not depend on undocumented behaviour.
+.git/
+.github/
+node_modules/
+
 # Full TypeScript source of the api, stripe and notify edge functions. These are
 # deployed to Supabase, never fetched by a browser.
 supabase/
