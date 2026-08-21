@@ -446,18 +446,46 @@ Deno.serve(async (req) => {
         expected_7pct_cents: Math.round(total * 0.07),
         expected_7pct_dollars: (Math.round(total * 0.07) / 100).toFixed(2),
       }));
-      const session = await stripe("checkout/sessions", {
-        mode: "payment",
-        line_items: lines.map(({ m, qty }) => ({
-          quantity: qty,
-          price_data: { currency: "usd", unit_amount: m.price_cents, product_data: { name: m.name } },
-        })),
-        payment_intent_data: { application_fee_amount: fee, transfer_data: { destination: vendor.payout_account_id } },
-        metadata: { order_id: order.id },
-        success_url: APP_URL + "/index.html?paid=1",
-        cancel_url: APP_URL + "/index.html?pay_cancelled=1",
-        expires_at: Math.floor(Date.now() / 1000) + 1800,
-      });
+      let session;
+      try {
+        session = await stripe("checkout/sessions", {
+          mode: "payment",
+          line_items: lines.map(({ m, qty }) => ({
+            quantity: qty,
+            price_data: { currency: "usd", unit_amount: m.price_cents, product_data: { name: m.name } },
+          })),
+          payment_intent_data: { application_fee_amount: fee, transfer_data: { destination: vendor.payout_account_id } },
+          metadata: { order_id: order.id },
+          success_url: APP_URL + "/index.html?paid=1",
+          cancel_url: APP_URL + "/index.html?pay_cancelled=1",
+          expires_at: Math.floor(Date.now() / 1000) + 1800,
+        });
+      } catch (e) {
+        // The order row was inserted before this call, so a rejection here
+        // strands it. Nothing will ever clear it on its own: no session was
+        // created, so checkout.session.expired never fires for it, and the row
+        // sits at 'pending_payment' forever showing the student a ghost order.
+        // Take it back out before returning.
+        const now = new Date().toISOString();
+        await admin.from("orders")
+          .update({ status: "cancelled", cancelled_at: now, updated_at: now })
+          .eq("id", order.id).eq("status", "pending_payment");
+
+        const msg = (e as Error).message;
+        console.error("[checkout] session rejected for order", order.id, "-", msg);
+        // A truck whose Connect account has no transfers capability is not a
+        // server fault and the student can do nothing about it, so it must not
+        // surface as the generic "something went wrong". This is the same
+        // situation as having no payout account at all — onboarding is simply
+        // unfinished — so it returns the same code the app already handles.
+        if (/capabilit|transfers|charges_enabled|not.*activated/i.test(msg)) {
+          return json({
+            error: "This truck hasn't finished setting up card payments yet — check back soon.",
+            code: "no_card_payments",
+          }, 400);
+        }
+        throw e;
+      }
       return json({ url: session.url, order_id: order.id, pickup_code });
     }
 
