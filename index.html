@@ -181,20 +181,47 @@ function locationLink(loc, fallback) {
 // Only the upper hemisphere is ever visible, so every topping sits above the
 // equator — anything below y=50 is drawn and then clipped away for nothing.
 const PEEK_SLOTS = [[50, 20], [30, 26], [70, 26], [38, 40], [62, 40], [20, 40], [80, 40]];
+// ORDER MATTERS — the first regex to match wins, so the most specific pies go
+// first. Daily Dough's real menu is the test case: "Triple Threat" lists
+// pepperoni AND ham, so it has to be caught by /bacon/ before the pepperoni and
+// hawaiian rules see it; "Saucy Buffalo" lists onions, so buffalo has to come
+// before the veggie rule. Every kind is exercised by name in the test suite.
 const PIE_KINDS = [
-  { m: /pepperoni|meat|sausage|supreme/i, cheese: "#f3c159", n: 5,
+  // Saucy Buffalo — buffalo chicken, jalapeños, onion, orange sauce drizzle.
+  { m: /buffalo|jalape/i, cheese: "#f0b44a", n: 5,
+    top: (x, y, i) => i % 2
+      ? `<circle cx="${x}" cy="${y}" r="5.4" fill="#4e9a3f"/><circle cx="${x}" cy="${y}" r="2.4" fill="#dff0d0"/>`
+      : `<rect x="${x - 5.5}" y="${y - 4}" width="11" height="8" rx="3" fill="#e8dcc0"/><rect x="${x - 5.5}" y="${y - 4}" width="11" height="8" rx="3" fill="#e2762e" opacity=".55"/>` },
+  // Triple Threat — pepperoni + bacon + ham together.
+  { m: /triple threat|bacon/i, cheese: "#f3c159", n: 6,
+    top: (x, y, i) => i % 3 === 0
+      ? `<circle cx="${x}" cy="${y}" r="7" fill="#c0392b"/><circle cx="${x}" cy="${y}" r="7" fill="none" stroke="#8e2b20" stroke-width="1.5" opacity=".55"/>`
+      : i % 3 === 1
+      ? `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>`
+      : `<path d="M${x - 6} ${y + 2} q3 -5 6 0 q3 5 6 0" fill="none" stroke="#9b5b3a" stroke-width="3.4" stroke-linecap="round"/>` },
+  { m: /pepperoni|salami|meat|sausage|supreme/i, cheese: "#f3c159", n: 5,
     top: (x, y) => `<circle cx="${x}" cy="${y}" r="7.5" fill="#c0392b"/><circle cx="${x}" cy="${y}" r="7.5" fill="none" stroke="#8e2b20" stroke-width="1.6" opacity=".55"/>` },
   { m: /margherita|basil|caprese|marinara/i, cheese: "#f7d9a4", n: 4,
     top: (x, y) => `<circle cx="${x}" cy="${y}" r="6.5" fill="#fffaf2"/><ellipse cx="${x + 7}" cy="${y - 5}" rx="6" ry="3.2" fill="#3f8e3f" transform="rotate(-25 ${x + 7} ${y - 5})"/>` },
-  { m: /veg|pepper|onion|spinach|garden/i, cheese: "#f3c159", n: 5,
-    top: (x, y) => `<rect x="${x - 6}" y="${y - 2.6}" width="12" height="5.2" rx="2.6" fill="#3f8e3f"/><circle cx="${x + 2}" cy="${y - 6}" r="3.4" fill="#d9483b"/>` },
+  { m: /hawaiian|pineapple/i, cheese: "#f7d9a4", n: 5,
+    top: (x, y, i) => i % 2
+      ? `<circle cx="${x}" cy="${y}" r="5.6" fill="#f2c14e"/><circle cx="${x}" cy="${y}" r="2.4" fill="#fbe6a8"/>`
+      : `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>` },
+  // Veggie Garden — red onion, bell pepper, mushroom, black olive, spinach.
+  { m: /veg|garden|spinach|bell pepper|onion/i, cheese: "#f3c159", n: 6,
+    top: (x, y, i) => [
+      `<rect x="${x - 6}" y="${y - 2.6}" width="12" height="5.2" rx="2.6" fill="#3f8e3f"/>`,
+      `<circle cx="${x}" cy="${y}" r="5.2" fill="#333a4a"/><circle cx="${x}" cy="${y}" r="2.1" fill="#f3c159"/>`,
+      `<ellipse cx="${x}" cy="${y - 1}" rx="6" ry="4.2" fill="#b98d63"/>`,
+      `<path d="M${x - 6} ${y} a6 6 0 0 1 12 0" fill="none" stroke="#9b7fc4" stroke-width="2.6"/>`,
+    ][i % 4] },
   { m: /mushroom|truffle/i, cheese: "#f3c159", n: 4,
     top: (x, y) => `<ellipse cx="${x}" cy="${y - 1}" rx="6.5" ry="4.4" fill="#b98d63"/><rect x="${x - 1.8}" y="${y + 1}" width="3.6" height="4.4" rx="1.4" fill="#e3c9a8"/>` },
   { m: /olive/i, cheese: "#f3c159", n: 5,
     top: (x, y) => `<circle cx="${x}" cy="${y}" r="5.4" fill="#333a4a"/><circle cx="${x}" cy="${y}" r="2.2" fill="#f3c159"/>` },
-  { m: /hawaiian|pineapple|ham/i, cheese: "#f7d9a4", n: 5,
-    top: (x, y) => `<circle cx="${x}" cy="${y}" r="5.6" fill="#f2c14e"/><circle cx="${x + 5}" cy="${y - 4}" r="4.2" fill="#e79ba0"/>` },
-  // Plain cheese, and the catch-all for any other pie: browned blistered spots.
+  { m: /ham/i, cheese: "#f7d9a4", n: 5,
+    top: (x, y) => `<rect x="${x - 5}" y="${y - 4}" width="10" height="8" rx="2" fill="#e79ba0"/>` },
+  // Cheesy Melt, and the catch-all for any other pie: browned blistered spots.
   { m: /./, cheese: "#f3c159", n: 4,
     top: (x, y) => `<ellipse cx="${x}" cy="${y}" rx="5.6" ry="4.2" fill="#e8a93f" opacity=".85"/>` },
 ];
@@ -235,7 +262,7 @@ function peekArt(m, truckName) {
     <circle cx="50" cy="50" r="48" fill="#e0a760"/>
     <circle cx="50" cy="50" r="41" fill="#c8452f"/>
     <circle cx="50" cy="50" r="38" fill="${kind.cheese}"/>
-    ${slots.map(([x, y]) => kind.top(x, y)).join("")}</svg></div>`;
+    ${slots.map(([x, y], i) => kind.top(x, y, i)).join("")}</svg></div>`;
 }
 
 let toastTimer;
