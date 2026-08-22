@@ -445,7 +445,13 @@ async function api(payload) {
 // second or two the probe was in flight, which is a flat lie now that payments
 // are live. Anything reading this must distinguish unknown from known-off.
 let stripeEnabled = null;
-const payState = () => (stripeEnabled === null ? "checking" : stripeEnabled ? "on" : "off");
+// "could not ask" is a fourth state. A blocked CORS response, a content
+// blocker, or being served from an origin the edge function does not allow all
+// make the request throw — and reporting that as "card payments aren't
+// switched on" is both wrong and unactionable for the student. Keep them apart.
+let payUnreachable = false;
+const payState = () =>
+  stripeEnabled === null ? "checking" : stripeEnabled ? "on" : payUnreachable ? "unreachable" : "off";
 async function stripeApi(payload) {
   const r = await fetch(SUPABASE_URL + "/functions/v1/stripe", { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
   const j = await r.json().catch(() => ({ error: "Bad response" }));
@@ -453,12 +459,28 @@ async function stripeApi(payload) {
   return j;
 }
 async function probeStripe() {
-  try { stripeEnabled = !!(await stripeApi({ action: "status" })).enabled; }
-  catch (e) { stripeEnabled = false; }
+  try {
+    stripeEnabled = !!(await stripeApi({ action: "status" })).enabled;
+    payUnreachable = false;
+  } catch (e) {
+    stripeEnabled = false;
+    payUnreachable = true;
+    // The origin is the single most useful thing here: the function only
+    // answers a fixed set, and a copy of this app served from anywhere else
+    // has its response discarded by the browser before this code can read it.
+    console.warn("[pay] could not reach the payment service from", location.origin, "-", e.message);
+  }
   // The trucks list shows a payment banner too, so re-render there as well —
   // previously only checkout was refreshed and the list kept whatever it had
   // guessed before the answer arrived.
   if (state.screen === "checkout" || state.screen === "trucks") render();
+}
+// Lets a student recover without hunting for a reload button — the usual cause
+// is a dropped connection, which fixes itself.
+async function retryPay() {
+  stripeEnabled = null; render();
+  await probeStripe();
+  render();
 }
 
 function go(screen) {
@@ -738,8 +760,10 @@ function render() {
     // Only claim ordering is closed when we have actually been told so. While
     // the probe is still in flight there is nothing truthful to say, so say
     // nothing rather than flash a pre-launch notice at someone who can order.
-    const launchBanner = payState() === "off"
-      ? `<div class="banner">Card payments aren't switched on yet — browse the menus in the meantime.</div>`
+    const launchBanner =
+      payState() === "off" ? `<div class="banner">Card payments aren't switched on yet — browse the menus in the meantime.</div>`
+      : payState() === "unreachable" ? `<div class="banner warn">Couldn't reach the payment service — you can browse, but ordering won't work until it's back.
+          <button type="button" class="link" style="padding:0" onclick="retryPay()">Try again</button></div>`
       : "";
     v.innerHTML = launchBanner +
       `<h2>Food trucks on campus</h2>` +
@@ -800,11 +824,14 @@ function render() {
           on: `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>`,
           checking: `<div class="banner">Checking card payments…</div>`,
           off: `<div class="banner">Card payments aren't switched on yet, so this order can't be placed.</div>`,
+          unreachable: `<div class="banner warn">Couldn't reach the payment service. Check your connection, then
+            <button type="button" class="link" style="padding:0" onclick="retryPay()">try again</button>.</div>`,
         }[payState()]}
         <button class="primary" type="submit" id="placeBtn"${payState() === "on" ? "" : " disabled"}>${
           { on: `Pay ${money(cartTotal())} with card`,
             checking: "Checking…",
-            off: "Card payments unavailable" }[payState()]}</button>
+            off: "Card payments unavailable",
+            unreachable: "Can't reach payments" }[payState()]}</button>
       </form>`;
   }
   if (state.screen === "orders") {
