@@ -251,9 +251,19 @@ if (!deviceKey) { deviceKey = crypto.randomUUID() + "-" + Math.random().toString
 
 let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null, truckTimer: null };
 const isOrderable = (t) => !!t && t.is_open && !t.orders_paused;
+// A truck can be open and still unable to take money — approved, unpaused, but
+// no finished Stripe onboarding behind it. create_checkout already refuses
+// those with a no_card_payments code, so without this a student fills a whole
+// cart and only finds out at the very last tap. `!== false` on purpose: if the
+// column is missing the answer is unknown, and unknown must not block ordering.
+const takesCards = (t) => !!t && t.accepts_cards !== false;
+const canOrder = (t) => isOrderable(t) && takesCards(t);
 // paused_until may not exist until the DB migration lands — fall back to selecting without it
 let hasPausedUntil = true;
-const VCOLS = () => "id,name,description,is_open,orders_paused,default_location" + (hasPausedUntil ? ",paused_until" : "");
+let hasAcceptsCards = true;
+const VCOLS = () => "id,name,description,is_open,orders_paused,default_location"
+  + (hasPausedUntil ? ",paused_until" : "")
+  + (hasAcceptsCards ? ",accepts_cards" : "");
 function breakLeftMs(t) {
   if (!t || !t.orders_paused || !t.paused_until) return null;
   return Math.max(0, new Date(t.paused_until).getTime() - Date.now());
@@ -429,9 +439,13 @@ async function api(payload) {
   return j;
 }
 
-// Card payments go live automatically once the `stripe` edge function is
-// deployed with keys — until then this probe fails closed to demo pay.
+// Three states, not two. null means "we have not heard back from the stripe
+// function yet", which is NOT the same as "card payments are off" — treating
+// them the same made checkout announce "Ordering opens at launch" during the
+// second or two the probe was in flight, which is a flat lie now that payments
+// are live. Anything reading this must distinguish unknown from known-off.
 let stripeEnabled = null;
+const payState = () => (stripeEnabled === null ? "checking" : stripeEnabled ? "on" : "off");
 async function stripeApi(payload) {
   const r = await fetch(SUPABASE_URL + "/functions/v1/stripe", { method: "POST", headers: { "Content-Type": "application/json", apikey: KEY, Authorization: "Bearer " + KEY }, body: JSON.stringify(payload) });
   const j = await r.json().catch(() => ({ error: "Bad response" }));
@@ -441,7 +455,10 @@ async function stripeApi(payload) {
 async function probeStripe() {
   try { stripeEnabled = !!(await stripeApi({ action: "status" })).enabled; }
   catch (e) { stripeEnabled = false; }
-  if (state.screen === "checkout") render();
+  // The trucks list shows a payment banner too, so re-render there as well —
+  // previously only checkout was refreshed and the list kept whatever it had
+  // guessed before the answer arrived.
+  if (state.screen === "checkout" || state.screen === "trucks") render();
 }
 
 function go(screen) {
@@ -606,11 +623,13 @@ function startOrderPolling() {
 }
 
 async function loadTrucks() {
-  let { data, error } = await sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false });
-  if (error && hasPausedUntil) {
-    hasPausedUntil = false;
-    ({ data, error } = await sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false }));
-  }
+  const q = () => sb.from("vendors").select(VCOLS()).eq("status", "approved").order("is_open", { ascending: false });
+  let { data, error } = await q();
+  // Both optional columns were added after launch, so drop them one at a time
+  // and retry rather than showing an empty truck list against an older schema
+  // (or a PostgREST cache that has not picked the column up yet).
+  if (error && hasAcceptsCards) { hasAcceptsCards = false; ({ data, error } = await q()); }
+  if (error && hasPausedUntil) { hasPausedUntil = false; ({ data, error } = await q()); }
  if (error) { console.error("truck load failed:", error); toast("Couldn't load trucks — try again in a moment.", "error"); }
   state.trucks = error ? [] : data; state.trucksLoaded = true; render();
 }
@@ -716,30 +735,34 @@ function etaMotto(left) {
 function render() {
   const v = $("view");
   if (state.screen === "trucks") {
-    // Banner reflects the ACTUAL payment state rather than being hardcoded.
-    // Once live keys are set, stripeEnabled flips true and the pre-launch
-    // notice disappears on its own — no code change needed at launch.
-    const launchBanner = stripeEnabled
-      ? ""
-      : `<div class="banner">🎉 Launching Fall 2026 at UC Merced — browse the menus now. Card payments open on launch day.</div>`;
+    // Only claim ordering is closed when we have actually been told so. While
+    // the probe is still in flight there is nothing truthful to say, so say
+    // nothing rather than flash a pre-launch notice at someone who can order.
+    const launchBanner = payState() === "off"
+      ? `<div class="banner">Card payments aren't switched on yet — browse the menus in the meantime.</div>`
+      : "";
     v.innerHTML = launchBanner +
       `<h2>Food trucks on campus</h2>` +
       (!state.trucksLoaded ? `<div class="empty">Loading trucks…</div>` :
       state.trucks.length ? state.trucks.map((t) => `
-        <div class="card truck ${isOrderable(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
-          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div>${locationLink(t.default_location)}${breakLeftMs(t) ? `<div class="muted">⏸️ Back in ~${Math.max(1, Math.ceil(breakLeftMs(t) / 60000))} min</div>` : ""}</div>
-          <span class="pill ${isOrderable(t) ? "open" : t.is_open ? "soon" : "closed"}">${isOrderable(t) ? "Open" : t.is_open ? "Back soon" : "Closed"}</span>
+        <div class="card truck ${canOrder(t) ? "" : "unorderable"}" onclick="openTruck('${t.id}')">
+          <div><h3>${esc(t.name)}</h3><div class="muted">${esc(t.description || "")}</div>${locationLink(t.default_location)}${breakLeftMs(t) ? `<div class="muted">⏸️ Back in ~${Math.max(1, Math.ceil(breakLeftMs(t) / 60000))} min</div>` : ""}${
+            isOrderable(t) && !takesCards(t) ? `<div class="muted">Setting up card payments — menu only for now</div>` : ""}</div>
+          <span class="pill ${canOrder(t) ? "open" : t.is_open ? "soon" : "closed"}">${
+            canOrder(t) ? "Open" : !takesCards(t) && t.is_open ? "Menu only" : t.is_open ? "Back soon" : "Closed"}</span>
         </div>`).join("") : `<div class="empty">No trucks yet — check back soon.</div>`);
   }
   if (state.screen === "menu") {
-    const t = state.truck; const orderable = isOrderable(t);
+    const t = state.truck; const orderable = canOrder(t);
     const left = breakLeftMs(t);
     const cd = left ? `${Math.floor(left / 60000)}:${String(Math.floor((left % 60000) / 1000)).padStart(2, "0")}` : null;
     const theme = themeFor(t);
     v.innerHTML = `<button class="link" onclick="go('trucks')">← All trucks</button>
       <div${theme ? ` data-vendor-theme="${esc(theme)}"` : ""}>
       <div class="card"><h2>${esc(t.name)}</h2>${locationLink(t.default_location, "")}</div>` +
-      (orderable ? "" : t.is_open
+      (orderable ? "" : !takesCards(t) && t.is_open
+        ? `<div class="banner">This truck is still finishing its card-payment setup, so you can browse the menu but not order yet.</div>`
+        : t.is_open
         ? `<div class="banner">⏸️ Taking a quick break — ${cd ? `back in <b style="font-variant-numeric:tabular-nums">${cd}</b>.` : left === 0 ? "back any minute now!" : "back soon!"} Browse the menu meanwhile.</div>`
         : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
       `<div class="card">` +
@@ -773,8 +796,15 @@ function render() {
       <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">
         <input id="s_phone" type="tel" placeholder="Phone (optional)">
-        ${stripeEnabled ? `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>` : `<div class="banner">🎉 Pre-launch preview — ordering opens when card payments go live for Fall 2026.</div>`}
-        <button class="primary" type="submit" id="placeBtn"${stripeEnabled ? "" : " disabled"}>${stripeEnabled ? `Pay ${money(cartTotal())} with card` : "Ordering opens at launch"}</button>
+        ${{
+          on: `<div class="banner">💳 Secure card payment via Stripe — you'll get a receipt by email.</div>`,
+          checking: `<div class="banner">Checking card payments…</div>`,
+          off: `<div class="banner">Card payments aren't switched on yet, so this order can't be placed.</div>`,
+        }[payState()]}
+        <button class="primary" type="submit" id="placeBtn"${payState() === "on" ? "" : " disabled"}>${
+          { on: `Pay ${money(cartTotal())} with card`,
+            checking: "Checking…",
+            off: "Card payments unavailable" }[payState()]}</button>
       </form>`;
   }
   if (state.screen === "orders") {
