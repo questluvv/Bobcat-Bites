@@ -9,5 +9,3 @@ Order-ahead pickup for UC Merced food trucks.
 
 
 On iPhone: open in Safari → Share → **Add to Home Screen** to install as an app.
-
-Backend: Supabase (Postgres + RLS + edge functions). Frontend: single-file PWAs, no build step.
