@@ -32,6 +32,11 @@ _config.yml
 netlify.toml
 wrangler.jsonc
 
+# Working files. There is no scratch/ directory today, and this is here so that
+# the day someone creates one for a mockup or a dump it is not published at
+# bobcat-bites.com/scratch/ by default.
+scratch/
+
 # Project documentation, not part of the app.
 README.md
 STRIPE-SETUP.md
