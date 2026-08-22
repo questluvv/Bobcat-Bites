@@ -521,7 +521,10 @@ async function deleteItem(id) { if (!confirm("Delete this item?")) return; const
 // ---------- orders ----------
 async function loadOrders() {
   const { data } = await sb.from("orders")
-    .select("id,status,eta_minutes,pickup_code,total_cents,created_at,confirmed_at,students(full_name,phone),order_items(item_name_snapshot,quantity,notes)")
+    // payment_intent_id is read so cancelOrder can refuse to "cancel" a paid
+    // order without refunding it. Its presence is the only local evidence that
+    // money changed hands.
+    .select("id,status,eta_minutes,pickup_code,total_cents,created_at,confirmed_at,payment_intent_id,students(full_name,phone),order_items(item_name_snapshot,quantity,notes)")
     .eq("vendor_id", state.vendor.id)
     .in("status", ["placed", "confirmed", "ready"])
     .order("created_at");
@@ -552,8 +555,30 @@ async function cancelOrder(id, started) {
     loadOrders();
     return;
   } catch (e) {
-    const { enabled } = await stripeApi({ action: "status" }).catch(() => ({ enabled: false }));
-    if (enabled) return toast("Couldn't refund: " + e.message, "error");
+    // Falling through to a plain status write cancels the order WITHOUT
+    // refunding, and notify_status_change then tells the student they were
+    // refunded in full. That is only ever acceptable when there was no payment
+    // to return, so this path has to prove that before taking it.
+    //
+    // The old code asked whether Stripe was configured and treated a failed
+    // question as a "no" — so one flaky request on truck wifi kept a paying
+    // student's money and told them otherwise. An unanswered probe means we do
+    // not know, and not knowing must leave the order exactly as it is.
+    let stripeOn;
+    try { stripeOn = !!(await stripeApi({ action: "status" })).enabled; }
+    catch {
+      return toast("Couldn't reach the server — nothing was changed. Check signal and try again.", "error");
+    }
+    if (stripeOn) return toast("Couldn't refund: " + e.message + " — the order is unchanged.", "error");
+
+    // Stripe says it is off, yet this order carries a payment reference, so
+    // money did change hands under a key that has since been removed. Refunding
+    // it needs a human in the Stripe dashboard; cancelling here would just hide
+    // it and claim a refund that never happened.
+    const order = state.orders.find((o) => o.id === id);
+    if (order?.payment_intent_id) {
+      return toast("This order was paid but card payments are switched off — refund it in Stripe first.", "error");
+    }
   }
   setOrder(id, "cancelled");
 }
@@ -580,7 +605,11 @@ async function setOrder(id, status, extra = {}) {
   // The .in() makes this a compare-and-set in one statement, so the database
   // settles the race rather than a read-then-write that can interleave.
   const from = ALLOWED_FROM[status];
+  // vendor_id is defence in depth, not the boundary — RLS is. But it is free,
+  // and it means a truck can only ever move its OWN orders even if a policy is
+  // later loosened by accident.
   let q = sb.from("orders").update(patch).eq("id", id);
+  if (state.vendor?.id) q = q.eq("vendor_id", state.vendor.id);
   if (from) q = q.in("status", from);
   const { data, error } = await q.select("id");
   if (error) return toast(error.message, "error");

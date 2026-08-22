@@ -25,7 +25,10 @@ const STRIPE_KEY = Deno.env.get("STRIPE_SECRET_KEY") ?? "";
 const WEBHOOK_SECRET = Deno.env.get("STRIPE_WEBHOOK_SECRET") ?? "";
 const FEE_BPS = parseInt(Deno.env.get("PLATFORM_FEE_BPS") ?? "700", 10);
 const FEE_FIXED = parseInt(Deno.env.get("PLATFORM_FEE_FIXED_CENTS") ?? "0", 10);
-const APP_URL = (Deno.env.get("APP_URL") ?? "https://questluvv.github.io/Bobcat-Bites").replace(/\/+$/, "");
+// The fallback is where students are returned after paying. It used to name the
+// GitHub Pages mirror, which is now retired — if APP_URL were ever unset, every
+// payer would have been handed back to a dead host holding a live order.
+const APP_URL = (Deno.env.get("APP_URL") ?? "https://bobcat-bites.com").replace(/\/+$/, "");
 
 function computePlatformFeeCents(totalCents: number): { fee: number; safeBps: number; safeFixed: number } {
   const safeBps = Number.isFinite(FEE_BPS) && FEE_BPS > 0 && FEE_BPS <= 10000 ? FEE_BPS : 700;
@@ -160,11 +163,41 @@ Deno.serve(async (req) => {
     if (orderId && event.type === "checkout.session.completed") {
       // Promote to 'placed' — this is what fires the vendor's new-order push,
       // via the DB trigger. Payment confirmed is the ONLY path to the kitchen.
-      const patch: Record<string, unknown> = { status: "placed", updated_at: new Date().toISOString() };
-      let { error } = await admin.from("orders").update({ ...patch, payment_intent_id: session.payment_intent }).eq("id", orderId);
-      if (error) ({ error } = await admin.from("orders").update(patch).eq("id", orderId));
-      if (error) console.error("[webhook] failed to mark order paid:", error.message);
-      else {
+      //
+      // Guarded on 'pending_payment' because Stripe retries an endpoint until
+      // it gets a 2xx and can deliver the same event more than once. Ungated,
+      // a redelivery landing after the truck had already confirmed would rewind
+      // the order to 'placed' and fire notify_new_order again — a brand new
+      // ticket for food that was already made. The 'expired' handler below has
+      // always been guarded this way; this one was not.
+      const now = new Date().toISOString();
+      const guard = (q: any) => q.eq("id", orderId).eq("status", "pending_payment").select("id");
+      let { data, error } = await guard(
+        admin.from("orders").update({ status: "placed", updated_at: now, payment_intent_id: session.payment_intent }),
+      );
+
+      // Retry WITHOUT the payment reference only when that column is what the
+      // database complained about. The old code dropped it on any error, so a
+      // single transient failure silently discarded the one value a refund
+      // needs — leaving a paid order that can never be refunded automatically.
+      if (error && /payment_intent_id/i.test(error.message)) {
+        ({ data, error } = await guard(admin.from("orders").update({ status: "placed", updated_at: now })));
+      }
+
+      if (error) {
+        console.error("[webhook] failed to mark order paid:", orderId, error.message);
+      } else if (!data?.length) {
+        // Nothing moved: an earlier delivery already promoted this order. Do
+        // not write a second status event and do not push again. Do still make
+        // sure the payment reference landed, in case the delivery that promoted
+        // it fell back to the reduced write above.
+        if (session.payment_intent) {
+          await admin.from("orders")
+            .update({ payment_intent_id: session.payment_intent })
+            .eq("id", orderId).is("payment_intent_id", null);
+        }
+        console.log("[webhook] order", orderId, "was already paid — ignoring repeat delivery");
+      } else {
         await admin.from("order_status_events").insert({ order_id: orderId, status: "placed", note: "paid via Stripe" });
         console.log("[webhook] order", orderId, "marked paid");
       }
