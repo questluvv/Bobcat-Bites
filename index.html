@@ -659,6 +659,19 @@ function notifyOrderChanges(prevOrders, freshOrders) {
   });
 }
 let orderPollTimer = null;
+// An order sits at 'pending_payment' from the moment checkout opens until the
+// webhook confirms payment. Two very different things look identical there: a
+// payment landing right now, and a student who closed the tab and never paid.
+//
+// Only the first resolves. The second waits for Stripe's checkout.session.expired,
+// and 30 minutes is the SHORTEST session Stripe allows — so for half an hour the
+// app was telling someone "Finishing payment…" about a payment that was never
+// going to arrive. A couple of minutes is far longer than the webhook needs, so
+// past that the honest reading is that it was abandoned.
+const PAY_GRACE_MS = 2 * 60 * 1000;
+const abandonedPayment = (o) =>
+  o.status === "pending_payment" && Date.now() - new Date(o.created_at).getTime() > PAY_GRACE_MS;
+
 function startOrderPolling() {
   if (orderPollTimer) return;
   loadOrders();
@@ -862,12 +875,14 @@ function render() {
       (state.orders.length ? state.orders.map((o) => {
         const cd = o.status === "confirmed" ? countdownFor(o) : null;
         return `<div class="card">
-          <div style="display:flex;justify-content:space-between;align-items:center"><h3>${esc(o.vendors?.name || "Truck")}</h3><span class="pill ${o.status}">${o.status.replace("_", " ")}</span></div>
+          <div style="display:flex;justify-content:space-between;align-items:center"><h3>${esc(o.vendors?.name || "Truck")}</h3><span class="pill ${o.status}">${abandonedPayment(o) ? "not paid" : o.status.replace("_", " ")}</span></div>
           ${locationLink(o.vendors?.default_location, "")}<div class="muted">${new Date(o.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</div>
           ${(o.order_items || []).map((i) => `<div class="item"><span>${i.quantity}× ${esc(i.item_name_snapshot)}</span><span>${money(i.unit_price_cents * i.quantity)}</span></div>`).join("")}
           <div class="total"><span>Total</span><span>${money(o.total_cents)}</span></div>
           ${o.status === "placed" ? `<div class="banner">Waiting for the truck to confirm…</div><div style="text-align:center"><button class="link" style="color:var(--red)" onclick="studentCancel('${o.id}')">Cancel order</button></div>` : ""}
-          ${o.status === "pending_payment" ? `<div class="banner">💳 Finishing payment… this updates on its own once Stripe confirms.</div>` : ""}
+          ${o.status === "pending_payment" ? (abandonedPayment(o)
+            ? `<div class="banner">Payment wasn't completed, so this never reached the truck and you weren't charged. It clears itself shortly — or just order again.</div>`
+            : `<div class="banner">💳 Finishing payment… this updates on its own once Stripe confirms.</div>`) : ""}
           ${cd ? `<div class="muted" style="text-align:center">Ready in about</div><div class="countdown">${cd.text}</div><div class="muted" style="text-align:center;margin-bottom:6px">${etaMotto(cd.left)}</div>` : ""}
           ${o.status === "ready" ? `<div class="banner warn" style="font-weight:700">🎉 Ready! Show this code at the window:</div>` : ""}
           ${o.status !== "cancelled" && o.status !== "picked_up" && o.status !== "pending_payment" ? `<div class="code">${esc(o.pickup_code || "")}</div>` : ""}
