@@ -54,6 +54,28 @@ function corsFor(req: Request): Record<string, string> {
   };
 }
 
+// ---- tiny in-memory rate limiter (per isolate). Same shape as the one in the
+//      api function, kept as its own copy because edge functions do not share
+//      modules. /subscribe is the only public route here and it writes with the
+//      service role, so an unthrottled caller could fill push_subscriptions at
+//      will. Per-isolate counting is imperfect but turns that into a grind. ----
+type Bucket = { count: number; resetAt: number; lockedUntil?: number };
+const buckets = new Map<string, Bucket>();
+function rateLimit(key: string, max: number, windowMs: number, lockMs = 0): { ok: boolean; retryAfter?: number } {
+  const now = Date.now();
+  let b = buckets.get(key);
+  if (b?.lockedUntil && now < b.lockedUntil) return { ok: false, retryAfter: Math.ceil((b.lockedUntil - now) / 1000) };
+  if (!b || now > b.resetAt) { b = { count: 0, resetAt: now + windowMs }; buckets.set(key, b); }
+  b.count++;
+  if (b.count > max) {
+    if (lockMs) b.lockedUntil = now + lockMs;
+    return { ok: false, retryAfter: Math.ceil(((b.lockedUntil ?? b.resetAt) - now) / 1000) };
+  }
+  return { ok: true };
+}
+const clientIp = (req: Request) =>
+  req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() || req.headers.get("cf-connecting-ip") || "unknown";
+
 function toE164US(raw?: string | null): string | null {
   if (!raw) return null;
   const t = String(raw).trim();
@@ -150,14 +172,34 @@ Deno.serve(async (req: Request) => {
   const url = new URL(req.url);
 
   // ============ PUBLIC: register / remove a push subscription ============
+  // This route runs on the service role, so whatever it accepts it performs
+  // with full authority and RLS never sees it. It exists ONLY for students,
+  // who have no login and are identified by a device_key they generated.
   if (url.pathname.endsWith("/subscribe")) {
+    // 20 per 10 minutes per IP. A real phone registers once and then only again
+    // after the browser rotates the subscription, so this is far above anything
+    // honest traffic does and still caps a scripted flood.
+    const rl = rateLimit(`sub:${clientIp(req)}`, 20, 10 * 60 * 1000);
+    if (!rl.ok) return json({ error: "Too many attempts. Try again shortly.", retry_after: rl.retryAfter }, 429);
+
     const body = await req.json().catch(() => ({} as Record<string, unknown>));
     const { device_key, vendor_id, subscription, unsubscribe } = body as {
       device_key?: string; vendor_id?: string; subscription?: { endpoint?: string }; unsubscribe?: boolean;
     };
 
-    if (!!device_key === !!vendor_id) {
-      return json({ error: "provide exactly one of device_key or vendor_id" }, 400);
+    // A vendor subscription used to be accepted here from anyone who could name
+    // a vendor_id — and vendor pushes describe incoming orders, so that handed
+    // a stranger a live feed of a truck's trade on their own phone. No client
+    // ever used it: the vendor app writes to push_subscriptions directly, where
+    // the RLS policy checks vendors.owner_user_id = auth.uid() and is the only
+    // path that can actually prove ownership. So this is closed rather than
+    // re-authenticated, which would only rebuild what RLS already does.
+    if (vendor_id) {
+      return json({ error: "Vendor alerts are enabled from the vendor app while signed in." }, 403);
+    }
+    if (!device_key) return json({ error: "device_key required" }, 400);
+    if (typeof device_key !== "string" || device_key.length < 16) {
+      return json({ error: "Missing/short device_key" }, 400);
     }
     if (!subscription?.endpoint) return json({ error: "subscription with endpoint required" }, 400);
 
@@ -365,17 +407,22 @@ Deno.serve(async (req: Request) => {
   }
 
   // ============ 1) NEW ORDER → web-push the vendor ============
-  const { order_id, vendor_id, total_cents, pickup_code } = payload as {
-    order_id?: string; vendor_id?: string; total_cents?: number; pickup_code?: string;
+  const { order_id, vendor_id, total_cents } = payload as {
+    order_id?: string; vendor_id?: string; total_cents?: number;
   };
   if (!vendor_id) return json({ error: "vendor_id required" }, 400);
 
   const { data: subs } = await db.from("push_subscriptions").select("id,subscription").eq("vendor_id", vendor_id);
   if (!subs?.length) return json({ ok: true, sent: 0, note: "no subscriptions" });
 
+  // The pickup code used to be in this line. It is the one thing that proves a
+  // student is collecting their own order, and a notification body is readable
+  // on a locked screen — so it does not belong in a preview. Anyone holding this
+  // subscription would have been handed every code as it was issued. The vendor
+  // taps through to the app, which shows the code against the order anyway.
   const r = await pushToSubscriptions(subs, {
     title: "🔔 New order!",
-    body: `$${((total_cents ?? 0) / 100).toFixed(2)} — pickup code ${pickup_code ?? "?"}. Tap to confirm.`,
+    body: `$${((total_cents ?? 0) / 100).toFixed(2)} — tap to confirm.`,
     tag: order_id ?? "new-order",
     url: "./vendor_app.html",
     audience: "vendor",
