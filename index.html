@@ -239,8 +239,29 @@ const API = SUPABASE_URL + "/functions/v1/api";
 // silently: the owner lands on the ordering page holding a live recovery token
 // and nothing here consumes it. Hand it to the vendor app with the fragment
 // intact. Read before createClient, which strips the fragment on startup.
+// Students order at bobcat-bites.com. Other copies of this file are published
+// — GitHub Pages, the workers.dev subdomain — and they are not harmless
+// duplicates:
+//
+//   * the stripe function only answers the canonical origins, so on any other
+//     host the browser discards its reply and the app cannot tell whether card
+//     payments work;
+//   * device_key lives in localStorage, which is per-origin, and Stripe returns
+//     everyone to APP_URL (bobcat-bites.com) after paying. Order somewhere else
+//     and you are handed back to an origin that has never seen your device key:
+//     My Orders is empty, the pickup code is gone, and the truck is still
+//     cooking a pizza nobody can claim.
+//
+// One hop to the real origin costs a moment and removes both. The recovery
+// forward runs first and is same-origin, so it still reaches the vendor app.
+const CANONICAL = "https://bobcat-bites.com";
+const onCanonicalOrigin = /^https:\/\/(www\.)?bobcat-bites\.com$/.test(location.origin)
+  || location.hostname === "localhost" || location.hostname === "127.0.0.1";
+
 if (/[#&?]type=recovery/.test(location.hash + location.search)) {
   location.replace("./vendor_app.html" + location.search + location.hash);
+} else if (!onCanonicalOrigin && location.protocol === "https:") {
+  location.replace(CANONICAL + "/index.html" + location.search + location.hash);
 }
 
 const sb = supabase.createClient(SUPABASE_URL, KEY);
