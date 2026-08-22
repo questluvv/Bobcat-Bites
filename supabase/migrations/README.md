@@ -32,13 +32,17 @@ into a secrets table or a database setting is separate work with its own diff.
 
 ## Two live findings recorded in the snapshot
 
-Both are commented at the policy they concern. Neither is fixed here, because
-a baseline that also changes things is not a baseline.
+Both are commented at the policy they concern. The baseline itself changes
+nothing — a baseline that also changes things is not a baseline — so the first
+is fixed in a migration of its own alongside it.
 
-**Vendors can self-approve.** `"Vendor owner manages own vendor row"` is
-`FOR ALL` with `WITH CHECK (owner_user_id = auth.uid())`. That constrains
-ownership but not `status`, so a signed-in vendor can insert or update their own
-row with `status = 'approved'` and put themselves on the public listing.
+**Vendors could self-approve — now closed.** `"Vendor owner manages own vendor
+row"` is `FOR ALL` with `WITH CHECK (owner_user_id = auth.uid())`. That
+constrains ownership but not `status`, so a signed-in vendor could set their own
+row to `status = 'approved'` and put themselves on the public listing, or point
+`payout_account_id` at another Stripe account. RLS cannot express the fix —
+`WITH CHECK` sees only the new row, never the old one — so it is closed with
+column privileges in `20260822093000_lock_vendor_status.sql`.
 
 **The vendor app cannot read customer names.** `students` has exactly one
 policy, `user_id = auth.uid()`. Students have no login, so `auth.uid()` is null

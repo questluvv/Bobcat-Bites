@@ -208,10 +208,12 @@ create policy "Public read approved vendors"
   on public.vendors for select to anon
   using (status = 'approved');
 
--- NOTE: this WITH CHECK constrains only ownership, not status. A signed-in
--- vendor can therefore insert or update their own row with status='approved'
--- and self-approve onto the public listing. Recorded here as it is live;
--- tightening it is tracked separately.
+-- NOTE: this WITH CHECK constrains only ownership, not status, so on its own
+-- it let a signed-in vendor set their own row to status='approved' and
+-- self-approve onto the public listing. RLS cannot express the fix — WITH
+-- CHECK sees only the new row, never the old one. It is closed by column
+-- privileges in 20260822093000_lock_vendor_status.sql, which must be applied
+-- alongside this file.
 drop policy if exists "Vendor owner manages own vendor row" on public.vendors;
 create policy "Vendor owner manages own vendor row"
   on public.vendors for all to authenticated
