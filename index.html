@@ -180,6 +180,58 @@
     background:rgba(229,72,77,.18); border-color:#a33; color:#ffd9d9;
   }
   [data-vendor-theme="daily-dough"] .empty { color:var(--dd-cream-dim); }
+
+  /* ---- Drink pills (top of the menu) + the pizza detail sheet ---------- */
+  .pills { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
+  .pillbtn { border:1px solid var(--blue-line); background:var(--blue-light); color:var(--blue-dark);
+    border-radius:99px; padding:8px 14px; font-size:14px; font-weight:700; cursor:pointer;
+    touch-action:manipulation; min-height:40px; }
+  .pillbtn.on { background:var(--blue); color:#fff; border-color:var(--blue); }
+  .pillbtn:disabled { opacity:.4; cursor:not-allowed; }
+  .pills-label { font-size:13px; font-weight:700; color:var(--muted); margin:2px 0 6px; }
+  [data-vendor-theme="daily-dough"] .pillbtn {
+    background:rgba(255,228,225,.06); border-color:var(--dd-gold); color:var(--dd-gold-light); }
+  [data-vendor-theme="daily-dough"] .pillbtn.on { background:var(--dd-gold); color:#3a0000; border-color:var(--dd-gold); }
+  [data-vendor-theme="daily-dough"] .pills-label { color:var(--dd-cream-dim); }
+  /* The "Choose" affordance on a pizza card that has sizes/toppings. */
+  .choose { border:1px solid var(--blue); background:var(--blue-light); color:var(--blue-dark);
+    border-radius:11px; padding:9px 16px; font-size:14px; font-weight:700; cursor:pointer;
+    touch-action:manipulation; min-height:44px; }
+  .choose:disabled { opacity:.4; cursor:not-allowed; }
+  [data-vendor-theme="daily-dough"] .choose { background:rgba(241,181,69,.14); border-color:var(--dd-gold); color:var(--dd-gold-light); }
+
+  /* Sheet: a bottom sheet over a scrim. Its own container (#sheet) so the
+     menu re-rendering on a timer never wipes a half-made choice. */
+  .sheet-back { position:fixed; inset:0; background:rgba(15,30,60,.5); z-index:200;
+    display:flex; align-items:flex-end; justify-content:center; }
+  .sheet { background:var(--card); width:100%; max-width:520px; border-radius:18px 18px 0 0;
+    padding:18px 18px 22px; max-height:88vh; overflow-y:auto;
+    box-shadow:0 -8px 30px rgba(15,30,60,.28); }
+  .sheet h3 { font-size:20px; margin-bottom:2px; }
+  .sheet .sub { color:var(--muted); font-size:13px; margin-bottom:14px; }
+  .sheet .grp { font-size:13px; font-weight:700; color:var(--muted); margin:14px 0 8px; text-transform:uppercase; letter-spacing:.03em; }
+  .sheet .grp .req { color:var(--red); }
+  .opt { display:flex; align-items:center; justify-content:space-between; gap:10px;
+    border:1px solid var(--blue-line); border-radius:12px; padding:12px 14px; margin-bottom:8px;
+    cursor:pointer; touch-action:manipulation; background:#fff; }
+  .opt.sel { border-color:var(--blue); background:var(--blue-light); }
+  .opt .lab { font-weight:600; }
+  .opt .pr { font-variant-numeric:tabular-nums; color:var(--muted); font-weight:700; }
+  .opt .box { width:22px; height:22px; border-radius:6px; border:2px solid var(--blue-line); flex:none; display:grid; place-items:center; font-size:14px; color:#fff; }
+  .opt .box.radio { border-radius:50%; }
+  .opt.sel .box { background:var(--blue); border-color:var(--blue); }
+  .sheet-actions { display:flex; align-items:center; gap:12px; margin-top:18px; }
+  .sheet-actions .qty { flex:none; }
+  .sheet-actions .primary { flex:1; margin:0; }
+  .sheet .close { float:right; background:none; border:none; font-size:24px; line-height:1; color:var(--muted); cursor:pointer; padding:0 4px; }
+  [data-vendor-theme="daily-dough"] .sheet { background:var(--dd-bg); border:1px solid var(--dd-line); }
+  [data-vendor-theme="daily-dough"] .sheet h3 { color:var(--dd-cream); }
+  [data-vendor-theme="daily-dough"] .sheet .sub, [data-vendor-theme="daily-dough"] .sheet .grp { color:var(--dd-cream-dim); }
+  [data-vendor-theme="daily-dough"] .opt { background:var(--dd-surface); border-color:var(--dd-line); color:var(--dd-cream); }
+  [data-vendor-theme="daily-dough"] .opt.sel { border-color:var(--dd-gold); background:rgba(241,181,69,.14); }
+  [data-vendor-theme="daily-dough"] .opt .pr { color:var(--dd-gold-light); }
+  [data-vendor-theme="daily-dough"] .opt.sel .box { background:var(--dd-gold); border-color:var(--dd-gold); color:#3a0000; }
+  [data-vendor-theme="daily-dough"] .sheet .close { color:var(--dd-cream-dim); }
   /* The pie sits on a dark board now, so it needs a light rim to separate from
      it rather than the drop shadow that worked against white. */
   [data-vendor-theme="daily-dough"] .peek {
@@ -217,6 +269,9 @@
      group because a clip-path on a rotating group turns with it, which swings the
      window open and lets the head bleed into the tail area. --><svg class="bobcat" viewBox="0 0 512 545" role="img" aria-label="Bobcat mascot"><defs><path id="bb-cat" fill="currentColor" d="m463.46 37.008l-30.694 50.738l-7.043-2.28c-27.146-8.797-71.525-7.15-97.6.11L321.22 87.5l-28.68-48.543c-33.63 69.254-32.264 117.56-14.79 148.574c18.71 33.208 57.378 49.09 99.117 48.574c48.743-.606 88.968-19.665 107.035-54.194c16.918-32.332 15.684-80.456-20.443-144.902zM323.935 137.594c18.45.1 29.36 15.338 31.462 36.644c-37.11 17.91-53.963 3.398-61.173-26.545c11.382-7.063 21.324-10.144 29.71-10.1zm109.26 0c8.385-.045 18.328 3.036 29.71 10.1c-7.21 29.942-24.064 44.454-61.174 26.544c2.104-21.306 13.014-36.545 31.463-36.644zm-293.553 50.96q-1.839-.014-3.66.018c-30.175.536-56.142 10.59-75.743 26.574c-43.444 35.43-57.27 100.752-12.824 166.192c20.293 33.995 44.432 54.24 70.797 64.187c32.85 12.395 66.655 8.823 99.94 4.114s65.854-10.63 96.896-8.42c31.04 2.212 62.09 10.18 90.505 41.165c19.374 21.125 46.887-1.627 23.82-24.156c-35.024-34.207-72.527-47.42-109.377-50.04s-72.2 4.698-104.207 9.228s-60.272 6.552-84.558-2.61c-14.39-5.43-28.308-14.802-41.55-31.142h351.744c13.673-52.293 14.867-106.368 1.873-142.072c-19.765 8.49-42.412 12.9-66.2 13.197h-.002c-29.85.37-59.458-6.925-82.907-22.823a426 426 0 0 0-14.292 9.685l-5.734 4.057l-5.49-4.382c-46.63-37.2-91.028-52.48-129.03-52.773z"/><clipPath id="bb-clip-body"><rect x="0" y="0" width="512" height="388"/></clipPath><clipPath id="bb-clip-tail"><rect x="0" y="388" width="512" height="157"/></clipPath></defs><g clip-path="url(#bb-clip-tail)"><g class="tail"><use href="#bb-cat"/></g></g><g clip-path="url(#bb-clip-body)"><use href="#bb-cat"/></g></svg> Bobcat <span>Bites</span></h1><span class="muted">UC Merced</span></header>
 <main id="view"></main>
+<!-- The pizza detail sheet renders here, outside #view, so a menu re-render on
+     the refresh timer never wipes a size/topping choice mid-selection. -->
+<div id="sheet"></div>
 <!-- Policy links must be reachable from the landing page, not just by URL:
      Stripe's risk review flagged "no verifiable contact or policy information".
      Sits above the fixed bottom nav (body already has padding-bottom for it). -->
@@ -270,7 +325,7 @@ const sb = supabase.createClient(SUPABASE_URL, KEY);
 let deviceKey = localStorage.getItem("bb_device_key");
 if (!deviceKey) { deviceKey = crypto.randomUUID() + "-" + Math.random().toString(36).slice(2, 10); localStorage.setItem("bb_device_key", deviceKey); }
 
-let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: {}, orders: [], pollTimer: null, tickTimer: null, truckTimer: null };
+let state = { screen: "trucks", trucks: [], trucksLoaded: false, menu: [], truck: null, cart: [], sheet: null, orders: [], pollTimer: null, tickTimer: null, truckTimer: null };
 const isOrderable = (t) => !!t && t.is_open && !t.orders_paused;
 // A truck can be open and still unable to take money — approved, unpaused, but
 // no finished Stripe onboarding behind it. create_checkout already refuses
@@ -506,6 +561,7 @@ async function retryPay() {
 
 function go(screen) {
   state.screen = screen;
+  closeSheet();
   document.querySelectorAll("nav button").forEach((b) => b.classList.remove("active"));
   $("nav-" + (screen === "orders" ? "orders" : "trucks")).classList.add("active");
   clearInterval(state.tickTimer); clearInterval(state.truckTimer);
@@ -699,23 +755,138 @@ async function refreshTruck() {
 }
 
 async function openTruck(id) {
-  state.truck = state.trucks.find((t) => t.id === id); state.cart = {}; state.screen = "menu"; render();
+  state.truck = state.trucks.find((t) => t.id === id); state.cart = []; state.sheet = null; state.screen = "menu"; render();
   clearInterval(state.tickTimer); clearInterval(state.truckTimer);
   state.tickTimer = setInterval(renderIfCounting, 1000);
   state.truckTimer = setInterval(refreshTruck, 10000);
- const { data, error } = await sb.from("menu_items").select("id,name,description,price_cents,default_prep_minutes,photo_url").eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
+  // One query pulls the item plus its sizes (variants) and toppings (modifiers).
+  // A flat item just comes back with empty child arrays and behaves as before.
+  const { data, error } = await sb.from("menu_items")
+    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort),menu_item_modifiers(id,label,price_cents,sort)")
+    .eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
 }
 
+// ---------- menu-item option helpers ----------
+const itemVariants = (m) => (m.menu_item_variants || []).slice().sort((a, b) => a.sort - b.sort);
+const itemMods = (m) => (m.menu_item_modifiers || []).slice().sort((a, b) => a.sort - b.sort);
+const hasOptions = (m) => itemVariants(m).length > 0 || itemMods(m).length > 0;
+const minPrice = (m) => { const vs = itemVariants(m); return vs.length ? Math.min(...vs.map((v) => v.price_cents)) : m.price_cents; };
+// The composed unit price, label and identity of one chosen configuration. The
+// price shown here is display-only; the stripe function recomputes it from the
+// same rows at checkout, so a tampered client can never change what is charged.
+const lineUnit = (m, variant, mods) => (variant ? variant.price_cents : m.price_cents) + mods.reduce((s, x) => s + x.price_cents, 0);
+const lineLabel = (m, variant, mods) => m.name + (variant ? ` (${variant.label})` : "") + (mods.length ? ` + ${mods.map((x) => x.label).join(", ")}` : "");
+const lineKey = (m, variant, mods) => [m.id, variant ? variant.id : "", mods.map((x) => x.id).slice().sort().join(",")].join("|");
+
+// ---------- cart (a list of configured lines) ----------
+function addLine(m, variant, mods, qty) {
+  const key = lineKey(m, variant, mods);
+  const ex = state.cart.find((l) => l.key === key);
+  if (ex) { ex.qty += qty; return; }
+  state.cart.push({
+    key, menu_item_id: m.id, name: lineLabel(m, variant, mods),
+    variant_id: variant ? variant.id : null, modifier_ids: mods.map((x) => x.id),
+    unit: lineUnit(m, variant, mods), qty,
+  });
+}
+const cartQtyForItem = (id) => state.cart.filter((l) => l.menu_item_id === id).reduce((a, l) => a + l.qty, 0);
+const cartCount = () => state.cart.reduce((a, l) => a + l.qty, 0);
+const cartTotal = () => state.cart.reduce((s, l) => s + l.unit * l.qty, 0);
+
+// Flat item (no sizes, no toppings): the inline +/- stepper on the card, kept
+// exactly as before so vendors with plain menus order the same as ever.
 function setQty(itemId, delta) {
   if (!isOrderable(state.truck)) return;
-  state.cart[itemId] = Math.max(0, (state.cart[itemId] || 0) + delta);
-  if (!state.cart[itemId]) delete state.cart[itemId];
+  const m = state.menu.find((x) => x.id === itemId); if (!m) return;
+  const key = lineKey(m, null, []);
+  const ex = state.cart.find((l) => l.key === key);
+  if (!ex) { if (delta > 0) addLine(m, null, [], 1); }
+  else { ex.qty = Math.max(0, ex.qty + delta); if (ex.qty === 0) state.cart = state.cart.filter((l) => l.key !== key); }
   render();
 }
-const cartCount = () => Object.values(state.cart).reduce((a, b) => a + b, 0);
-const cartTotal = () => Object.entries(state.cart).reduce((sum, [id, q]) => sum + (state.menu.find((m) => m.id === id)?.price_cents || 0) * q, 0);
+// A drink pill adds that drink straight to the cart.
+function addDrink(itemId) {
+  if (!isOrderable(state.truck)) return;
+  const d = state.menu.find((x) => x.id === itemId); if (!d) return;
+  addLine(d, null, [], 1); render(); toast(`${d.name} added`);
+}
+function setLineQty(key, delta) {
+  const l = state.cart.find((x) => x.key === key); if (!l) return;
+  l.qty = Math.max(0, l.qty + delta);
+  if (l.qty === 0) state.cart = state.cart.filter((x) => x.key !== key);
+  render();
+}
+
+// ---------- the pizza detail sheet ----------
+function openSheet(itemId) {
+  if (!isOrderable(state.truck)) return;
+  const m = state.menu.find((x) => x.id === itemId); if (!m) return;
+  const vs = itemVariants(m);
+  state.sheet = { itemId, variantId: vs.length ? vs[0].id : null, modIds: [], drinkId: null, qty: 1 };
+  renderSheet();
+}
+function closeSheet() { state.sheet = null; const el = $("sheet"); if (el) el.innerHTML = ""; }
+function sheetPickSize(id) { if (state.sheet) { state.sheet.variantId = id; renderSheet(); } }
+function sheetToggleMod(id) {
+  const s = state.sheet; if (!s) return;
+  s.modIds = s.modIds.includes(id) ? s.modIds.filter((x) => x !== id) : [...s.modIds, id];
+  renderSheet();
+}
+function sheetPickDrink(id) { const s = state.sheet; if (s) { s.drinkId = s.drinkId === id ? null : id; renderSheet(); } }
+function sheetQty(delta) { const s = state.sheet; if (s) { s.qty = Math.max(1, Math.min(20, s.qty + delta)); renderSheet(); } }
+function addSheetToCart() {
+  const s = state.sheet; if (!s) return;
+  const m = state.menu.find((x) => x.id === s.itemId); if (!m) return;
+  const vs = itemVariants(m);
+  const variant = vs.find((v) => v.id === s.variantId) || null;
+  if (vs.length && !variant) { toast("Pick a size first", "error"); return; }
+  const mods = itemMods(m).filter((x) => s.modIds.includes(x.id));
+  addLine(m, variant, mods, s.qty);
+  if (s.drinkId) { const d = state.menu.find((x) => x.id === s.drinkId); if (d) addLine(d, null, [], 1); }
+  closeSheet(); render(); toast("Added to cart");
+}
+function renderSheet() {
+  const el = $("sheet"); const s = state.sheet;
+  if (!el) return;
+  if (!s) { el.innerHTML = ""; return; }
+  const m = state.menu.find((x) => x.id === s.itemId); if (!m) { el.innerHTML = ""; return; }
+  const theme = themeFor(state.truck);
+  const vs = itemVariants(m), mods = itemMods(m);
+  const drinks = state.menu.filter((x) => x.category === "drink");
+  const variant = vs.find((v) => v.id === s.variantId) || null;
+  const chosenMods = mods.filter((x) => s.modIds.includes(x.id));
+  const pizzaUnit = lineUnit(m, variant, chosenMods);
+  const drink = s.drinkId ? drinks.find((d) => d.id === s.drinkId) : null;
+  const composed = pizzaUnit * s.qty + (drink ? drink.price_cents : 0);
+  const box = (sel, radio) => `<span class="box ${radio ? "radio" : ""}">${sel ? "✓" : ""}</span>`;
+  el.innerHTML = `<div class="sheet-back"${theme ? ` data-vendor-theme="${esc(theme)}"` : ""} onclick="if(event.target===this)closeSheet()">
+    <div class="sheet" role="dialog" aria-modal="true" aria-label="${esc(m.name)} options">
+      <button class="close" aria-label="Close" onclick="closeSheet()">×</button>
+      <h3>${esc(m.name)}</h3>${m.description ? `<div class="sub">${esc(m.description)}</div>` : ""}
+      ${vs.length ? `<div class="grp">Size <span class="req">*</span></div>` + vs.map((v) => `
+        <div class="opt ${variant && variant.id === v.id ? "sel" : ""}" onclick="sheetPickSize('${v.id}')">
+          <span class="lab">${box(variant && variant.id === v.id, true)} ${esc(v.label)}</span>
+          <span class="pr">${money(v.price_cents)}</span></div>`).join("") : ""}
+      ${mods.length ? `<div class="grp">Extra toppings</div>` + mods.map((x) => `
+        <div class="opt ${s.modIds.includes(x.id) ? "sel" : ""}" onclick="sheetToggleMod('${x.id}')">
+          <span class="lab">${box(s.modIds.includes(x.id), false)} ${esc(x.label)}</span>
+          <span class="pr">+${money(x.price_cents)}</span></div>`).join("") : ""}
+      ${drinks.length ? `<div class="grp">Add a drink?</div>` + drinks.map((d) => `
+        <div class="opt ${s.drinkId === d.id ? "sel" : ""}" onclick="sheetPickDrink('${d.id}')">
+          <span class="lab">${box(s.drinkId === d.id, false)} ${esc(d.name)}</span>
+          <span class="pr">+${money(d.price_cents)}</span></div>`).join("") : ""}
+      <div class="sheet-actions">
+        <div class="qty">
+          <button aria-label="One fewer" onclick="sheetQty(-1)">−</button>
+          <b aria-live="polite">${s.qty}</b>
+          <button aria-label="One more" onclick="sheetQty(1)">+</button>
+        </div>
+        <button class="primary" onclick="addSheetToCart()">Add ${s.qty} · ${money(composed)}</button>
+      </div>
+    </div></div>`;
+}
 
 async function placeOrder() {
   if (!isOrderable(state.truck)) { toast("This truck isn't accepting orders right now.", "error"); go("trucks"); return; }
@@ -725,7 +896,7 @@ async function placeOrder() {
     device_key: deviceKey,
     student_name: $("s_name").value.trim(), phone: $("s_phone").value.trim(),
     vendor_id: state.truck.id,
-    items: Object.entries(state.cart).map(([menu_item_id, quantity]) => ({ menu_item_id, quantity })),
+    items: state.cart.map((l) => ({ menu_item_id: l.menu_item_id, variant_id: l.variant_id || undefined, modifier_ids: l.modifier_ids, quantity: l.qty })),
   };
   localStorage.setItem("bb_name", details.student_name);
   // Stripe Checkout is the ONLY way to create an order. There used to be a
@@ -788,6 +959,40 @@ function etaMotto(left) {
   return "Fresh takes a minute. Worth every second 🌯";
 }
 
+// The drink pill row at the top of the menu. Empty string if the truck has no
+// drinks, so a plain-menu vendor shows nothing extra.
+function drinkPills(orderable) {
+  const drinks = state.menu.filter((m) => m.category === "drink");
+  if (!drinks.length) return "";
+  return `<div class="pills-label">Drinks</div><div class="pills">` + drinks.map((d) => {
+    const n = cartQtyForItem(d.id);
+    return `<button class="pillbtn ${n ? "on" : ""}" ${orderable ? "" : "disabled"} onclick="addDrink('${d.id}')">${esc(d.name)} · ${money(d.price_cents)}${n ? ` ×${n}` : ""}</button>`;
+  }).join("") + `</div>`;
+}
+// One menu row. An item with sizes or toppings shows a "from" price and opens
+// the detail sheet; a flat item keeps the inline +/- stepper it always had.
+function menuItemRow(m, orderable, truckName) {
+  const opts = hasOptions(m);
+  const { size, rest } = splitSize(m.description);
+  const desc = opts ? (m.description || "") : rest;
+  const inCart = cartQtyForItem(m.id);
+  const actions = opts
+    ? `<div><span class="price">from ${money(minPrice(m))}</span></div>
+       <button class="choose" ${orderable ? "" : "disabled"} onclick="openSheet('${m.id}')">${inCart ? `In cart · ${inCart}` : "Choose"}</button>`
+    : `<div><span class="price">${money(m.price_cents)}</span> <span class="muted prep">· ~${m.default_prep_minutes} min</span></div>
+       <div class="qty">
+         <button ${orderable ? "" : "disabled"} aria-label="One fewer ${esc(m.name)}" onclick="setQty('${m.id}',-1)">−</button>
+         <b aria-live="polite" aria-label="${inCart} in cart">${inCart}</b>
+         <button ${orderable ? "" : "disabled"} aria-label="One more ${esc(m.name)}" onclick="setQty('${m.id}',1)">+</button>
+       </div>`;
+  return `<div class="item peeked">
+    ${peekArt(m, truckName)}
+    <div class="it-main"><b>${esc(m.name)}</b>${!opts && size ? `<span class="size-tag">${esc(size)}</span>` : ""}
+      ${desc ? `<div class="muted">${esc(desc)}</div>` : ""}</div>
+    <div class="it-actions">${actions}</div>
+  </div>`;
+}
+
 function render() {
   const v = $("view");
   if (state.screen === "trucks") {
@@ -823,33 +1028,17 @@ function render() {
         : t.is_open
         ? `<div class="banner">⏸️ Taking a quick break — ${cd ? `back in <b style="font-variant-numeric:tabular-nums">${cd}</b>.` : left === 0 ? "back any minute now!" : "back soon!"} Browse the menu meanwhile.</div>`
         : `<div class="banner warn">🚫 This truck is closed right now — you can browse the menu but can't order.</div>`) +
-      `<div class="card">` +
-      (state.menu.length ? state.menu.map((m) => {
-        const { size, rest } = splitSize(m.description);
-        const qty = state.cart[m.id] || 0;
-        return `
-        <div class="item peeked">
-          ${peekArt(m, t.name)}
-          <div class="it-main">
-            <b>${esc(m.name)}</b>${size ? `<span class="size-tag">${esc(size)}</span>` : ""}
-            ${rest ? `<div class="muted">${esc(rest)}</div>` : ""}
-          </div>
-          <div class="it-actions">
-            <div><span class="price">${money(m.price_cents)}</span> <span class="muted prep">· ~${m.default_prep_minutes} min</span></div>
-            <div class="qty">
-              <button ${orderable ? "" : "disabled"} aria-label="One fewer ${esc(m.name)}" onclick="setQty('${m.id}',-1)">−</button>
-              <b aria-live="polite" aria-label="${qty} in cart">${qty}</b>
-              <button ${orderable ? "" : "disabled"} aria-label="One more ${esc(m.name)}" onclick="setQty('${m.id}',1)">+</button>
-            </div>
-          </div>
-        </div>`; }).join("") : `<div class="empty">Loading menu…</div>`) + `</div>` +
+      drinkPills(orderable) +
+      (!state.menu.length ? `<div class="card"><div class="empty">Loading menu…</div></div>`
+        : (() => { const mains = state.menu.filter((m) => m.category !== "drink");
+            return mains.length ? `<div class="card">` + mains.map((m) => menuItemRow(m, orderable, t.name)).join("") + `</div>` : ""; })()) +
       (orderable && cartCount() ? `<button class="primary" onclick="state.screen='checkout';render()">Checkout · ${cartCount()} item${cartCount() > 1 ? "s" : ""} · ${money(cartTotal())}</button>` : "") +
       `</div>`;
   }
   if (state.screen === "checkout") {
     v.innerHTML = `<button class="link" onclick="state.screen='menu';render()">← Back to menu</button>
       <div class="card"><h2>Checkout — ${esc(state.truck.name)}</h2>` +
-      Object.entries(state.cart).map(([id, q]) => { const m = state.menu.find((x) => x.id === id); return `<div class="item"><span>${q}× ${esc(m.name)}</span><span>${money(m.price_cents * q)}</span></div>`; }).join("") +
+      state.cart.map((l) => `<div class="item"><span>${l.qty}× ${esc(l.name)}</span><span>${money(l.unit * l.qty)}</span></div>`).join("") +
       `<div class="total"><span>Total</span><span>${money(cartTotal())}</span></div></div>
       <form class="card" onsubmit="event.preventDefault();placeOrder()"><h3 style="margin-bottom:10px">Your info</h3>
         <input id="s_name" placeholder="Name (shown to the truck)" value="${esc(localStorage.getItem("bb_name") || "")}">

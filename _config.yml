@@ -18,3 +18,4 @@ exclude:
   - netlify.toml    # config for a host this project no longer publishes to
   - BOBCAT_1.pdf
   - skills-lock.json
+  - menu-redesign-spec.md

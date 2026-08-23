@@ -421,7 +421,7 @@ Deno.serve(async (req) => {
     if (action === "create_checkout") {
       const { device_key, student_name, phone, vendor_id, items } = body as {
         device_key: string; student_name: string; phone?: string; vendor_id: string;
-        items: { menu_item_id: string; quantity: number }[];
+        items: { menu_item_id: string; variant_id?: string; modifier_ids?: string[]; quantity: number }[];
       };
       if (!device_key || !student_name?.trim() || !vendor_id || !items?.length) return json({ error: "Missing order details" }, 400);
       // Bound the array: every element becomes a row insert, so an unbounded
@@ -433,17 +433,65 @@ Deno.serve(async (req) => {
       if (!vendor.is_open || vendor.orders_paused) return json({ error: "This truck isn't accepting orders right now" }, 400);
       if (!vendor.payout_account_id) return json({ error: "This truck isn't set up for card payments yet", code: "no_card_payments" }, 400);
 
-      const ids = items.map((i) => i.menu_item_id);
-      const { data: menu } = await admin.from("menu_items").select("*").eq("vendor_id", vendor_id).eq("is_available", true).in("id", ids);
-      if (!menu || menu.length !== new Set(ids).size) return json({ error: "Some items are no longer available" }, 400);
+      // Load every referenced item, scoped to this vendor and available.
+      const ids = [...new Set(items.map((i) => i.menu_item_id))];
+      const { data: menu } = await admin.from("menu_items")
+        .select("id,name,price_cents").eq("vendor_id", vendor_id).eq("is_available", true).in("id", ids);
+      if (!menu || menu.length !== ids.length) return json({ error: "Some items are no longer available" }, 400);
 
+      // Variants and modifiers for exactly those items. Filtering by
+      // menu_item_id IN (this vendor's items) means a variant or modifier from
+      // another item — or another truck — is never loaded, so a foreign id sent
+      // by the client cannot match anything in the checks below.
+      const { data: variants } = await admin.from("menu_item_variants")
+        .select("id,menu_item_id,label,price_cents").in("menu_item_id", ids);
+      const { data: modifiers } = await admin.from("menu_item_modifiers")
+        .select("id,menu_item_id,label,price_cents").in("menu_item_id", ids);
+      const variantsByItem = new Map<string, any[]>();
+      for (const v of variants ?? []) {
+        const arr = variantsByItem.get(v.menu_item_id) ?? [];
+        arr.push(v); variantsByItem.set(v.menu_item_id, arr);
+      }
+
+      // Recompute every price here. The client sends only choices — which item,
+      // which size, which toppings — and a display price it does NOT get to
+      // decide. This is the single source of truth for what the card is charged.
       let total = 0;
-      const lines = items.map((i) => {
-        const m = menu.find((x) => x.id === i.menu_item_id)!;
+      const lines: { name: string; unit: number; qty: number; item_id: string }[] = [];
+      for (const i of items) {
+        const m = menu.find((x) => x.id === i.menu_item_id);
+        if (!m) return json({ error: "Some items are no longer available" }, 400);
         const qty = Math.max(1, Math.min(20, Math.floor(i.quantity)));
-        total += m.price_cents * qty;
-        return { m, qty };
-      });
+
+        const itemVariants = variantsByItem.get(m.id) ?? [];
+        let variant: any = null;
+        if (i.variant_id) {
+          variant = itemVariants.find((v) => v.id === i.variant_id) ?? null;
+          if (!variant) return json({ error: "That size isn't available for this item." }, 400);
+        } else if (itemVariants.length > 0) {
+          // Sold by size, but none was chosen. Refuse rather than guess —
+          // guessing would charge a whole-pie price for a slice, or the reverse.
+          return json({ error: "Choose a size for " + m.name + "." }, 400);
+        }
+
+        let unit = variant ? variant.price_cents : m.price_cents;
+        const chosenMods: any[] = [];
+        for (const mid of i.modifier_ids ?? []) {
+          const mod = (modifiers ?? []).find((x) => x.id === mid && x.menu_item_id === m.id);
+          if (!mod) return json({ error: "One of the add-ons isn't available for this item." }, 400);
+          chosenMods.push(mod);
+          unit += mod.price_cents;
+        }
+
+        // The kitchen ticket and the receipt both read this label, so it has to
+        // describe the whole choice even if the menu changes afterwards.
+        const label = m.name
+          + (variant ? " (" + variant.label + ")" : "")
+          + (chosenMods.length ? " + " + chosenMods.map((x) => x.label).join(", ") : "");
+
+        total += unit * qty;
+        lines.push({ name: label, unit, qty, item_id: m.id });
+      }
 
       let { data: student } = await admin.from("students").select("*").eq("device_key", device_key).maybeSingle();
       if (!student) {
@@ -459,10 +507,10 @@ Deno.serve(async (req) => {
         student_id: student.id, vendor_id, status: "pending_payment", pickup_code,
         total_cents: total, subtotal_cents: total,
       }, ["subtotal_cents"]);
-      for (const { m, qty } of lines) {
+      for (const ln of lines) {
         await insertRow("order_items", {
-          order_id: order.id, menu_item_id: m.id, item_name_snapshot: m.name,
-          unit_price_cents: m.price_cents, quantity: qty,
+          order_id: order.id, menu_item_id: ln.item_id, item_name_snapshot: ln.name,
+          unit_price_cents: ln.unit, quantity: ln.qty,
         }, ["menu_item_id"]);
       }
 
@@ -483,9 +531,9 @@ Deno.serve(async (req) => {
       try {
         session = await stripe("checkout/sessions", {
           mode: "payment",
-          line_items: lines.map(({ m, qty }) => ({
-            quantity: qty,
-            price_data: { currency: "usd", unit_amount: m.price_cents, product_data: { name: m.name } },
+          line_items: lines.map((ln) => ({
+            quantity: ln.qty,
+            price_data: { currency: "usd", unit_amount: ln.unit, product_data: { name: ln.name } },
           })),
           payment_intent_data: { application_fee_amount: fee, transfer_data: { destination: vendor.payout_account_id } },
           metadata: { order_id: order.id },
