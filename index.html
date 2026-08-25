@@ -449,6 +449,7 @@ const PIE_KINDS = [
 // shake is a pizza looks broken, and every truck here is not a pizzeria.
 const DISH_GLYPHS = [
   [/shake|smoothie|malt|horchata|soda|lemonade|drink|juice|coffee/i, "🥤"],
+  [/ranch|dip|dressing|sauce cup|aioli|marinara cup/i, "🥣"],
   [/pasta|spaghetti|noodle|linguine|penne/i, "🍝"],
   [/burrito|taco|quesadilla|wrap/i, "🌯"],
   [/burger|cheeseburger/i, "🍔"],
@@ -762,7 +763,7 @@ async function openTruck(id) {
   // One query pulls the item plus its sizes (variants) and toppings (modifiers).
   // A flat item just comes back with empty child arrays and behaves as before.
   const { data, error } = await sb.from("menu_items")
-    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort),menu_item_modifiers(id,label,price_cents,sort)")
+    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort,allows_modifiers),menu_item_modifiers(id,label,price_cents,sort)")
     .eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
@@ -828,7 +829,17 @@ function openSheet(itemId) {
   renderSheet();
 }
 function closeSheet() { state.sheet = null; const el = $("sheet"); if (el) el.innerHTML = ""; }
-function sheetPickSize(id) { if (state.sheet) { state.sheet.variantId = id; renderSheet(); } }
+function sheetPickSize(id) {
+  const s = state.sheet; if (!s) return;
+  s.variantId = id;
+  // Switching to a size that can't be customised (a slice) drops any toppings
+  // already ticked, so the cart line and the price never carry a topping the
+  // kitchen won't add.
+  const m = state.menu.find((x) => x.id === s.itemId);
+  const v = m && itemVariants(m).find((x) => x.id === id);
+  if (v && v.allows_modifiers === false) s.modIds = [];
+  renderSheet();
+}
 function sheetToggleMod(id) {
   const s = state.sheet; if (!s) return;
   s.modIds = s.modIds.includes(id) ? s.modIds.filter((x) => x !== id) : [...s.modIds, id];
@@ -842,7 +853,8 @@ function addSheetToCart() {
   const vs = itemVariants(m);
   const variant = vs.find((v) => v.id === s.variantId) || null;
   if (vs.length && !variant) { toast("Pick a size first", "error"); return; }
-  const mods = itemMods(m).filter((x) => s.modIds.includes(x.id));
+  const canMod = !variant || variant.allows_modifiers !== false;
+  const mods = canMod ? itemMods(m).filter((x) => s.modIds.includes(x.id)) : [];
   addLine(m, variant, mods, s.qty);
   if (s.drinkId) { const d = state.menu.find((x) => x.id === s.drinkId); if (d) addLine(d, null, [], 1); }
   closeSheet(); render(); toast("Added to cart");
@@ -856,7 +868,9 @@ function renderSheet() {
   const vs = itemVariants(m), mods = itemMods(m);
   const drinks = state.menu.filter((x) => x.category === "drink");
   const variant = vs.find((v) => v.id === s.variantId) || null;
-  const chosenMods = mods.filter((x) => s.modIds.includes(x.id));
+  // Toppings only apply to a size that allows them (whole, not slice).
+  const canMod = !variant || variant.allows_modifiers !== false;
+  const chosenMods = canMod ? mods.filter((x) => s.modIds.includes(x.id)) : [];
   const pizzaUnit = lineUnit(m, variant, chosenMods);
   const drink = s.drinkId ? drinks.find((d) => d.id === s.drinkId) : null;
   const composed = pizzaUnit * s.qty + (drink ? drink.price_cents : 0);
@@ -869,7 +883,7 @@ function renderSheet() {
         <div class="opt ${variant && variant.id === v.id ? "sel" : ""}" onclick="sheetPickSize('${v.id}')">
           <span class="lab">${box(variant && variant.id === v.id, true)} ${esc(v.label)}</span>
           <span class="pr">${money(v.price_cents)}</span></div>`).join("") : ""}
-      ${mods.length ? `<div class="grp">Extra toppings</div>` + mods.map((x) => `
+      ${mods.length && canMod ? `<div class="grp">Extra toppings</div>` + mods.map((x) => `
         <div class="opt ${s.modIds.includes(x.id) ? "sel" : ""}" onclick="sheetToggleMod('${x.id}')">
           <span class="lab">${box(s.modIds.includes(x.id), false)} ${esc(x.label)}</span>
           <span class="pr">+${money(x.price_cents)}</span></div>`).join("") : ""}

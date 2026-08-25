@@ -444,7 +444,7 @@ Deno.serve(async (req) => {
       // another item — or another truck — is never loaded, so a foreign id sent
       // by the client cannot match anything in the checks below.
       const { data: variants } = await admin.from("menu_item_variants")
-        .select("id,menu_item_id,label,price_cents").in("menu_item_id", ids);
+        .select("id,menu_item_id,label,price_cents,allows_modifiers").in("menu_item_id", ids);
       const { data: modifiers } = await admin.from("menu_item_modifiers")
         .select("id,menu_item_id,label,price_cents").in("menu_item_id", ids);
       const variantsByItem = new Map<string, any[]>();
@@ -472,6 +472,13 @@ Deno.serve(async (req) => {
           // Sold by size, but none was chosen. Refuse rather than guess —
           // guessing would charge a whole-pie price for a slice, or the reverse.
           return json({ error: "Choose a size for " + m.name + "." }, 400);
+        }
+
+        // Some sizes can't be customised (a slice is "not customizable"). Refuse
+        // toppings on them rather than silently charging for something the
+        // kitchen won't make.
+        if ((i.modifier_ids?.length ?? 0) > 0 && variant && variant.allows_modifiers === false) {
+          return json({ error: "That size can't have toppings added." }, 400);
         }
 
         let unit = variant ? variant.price_cents : m.price_cents;
