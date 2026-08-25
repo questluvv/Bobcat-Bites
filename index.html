@@ -764,7 +764,7 @@ async function openTruck(id) {
   // One query pulls the item plus its sizes (variants) and toppings (modifiers).
   // A flat item just comes back with empty child arrays and behaves as before.
   const { data, error } = await sb.from("menu_items")
-    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort,allows_modifiers),menu_item_modifiers(id,label,price_cents,sort)")
+    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort,allows_modifiers),menu_item_modifiers(id,label,price_cents,sort,kind)")
     .eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
@@ -774,13 +774,24 @@ async function openTruck(id) {
 const MAX_TOPPINGS = 3; // Daily Dough caps a pizza at three toppings.
 const itemVariants = (m) => (m.menu_item_variants || []).slice().sort((a, b) => a.sort - b.sort);
 const itemMods = (m) => (m.menu_item_modifiers || []).slice().sort((a, b) => a.sort - b.sort);
+// A sauce (white-sauce swap) is a modifier of kind 'sauce': free, whole-only,
+// and it doesn't count toward the topping cap. Toppings are everything else.
+const itemToppings = (m) => itemMods(m).filter((x) => x.kind !== "sauce");
+const itemSauces = (m) => itemMods(m).filter((x) => x.kind === "sauce");
 const hasOptions = (m) => itemVariants(m).length > 0 || itemMods(m).length > 0;
 const minPrice = (m) => { const vs = itemVariants(m); return vs.length ? Math.min(...vs.map((v) => v.price_cents)) : m.price_cents; };
 // The composed unit price, label and identity of one chosen configuration. The
 // price shown here is display-only; the stripe function recomputes it from the
 // same rows at checkout, so a tampered client can never change what is charged.
 const lineUnit = (m, variant, mods) => (variant ? variant.price_cents : m.price_cents) + mods.reduce((s, x) => s + x.price_cents, 0);
-const lineLabel = (m, variant, mods) => m.name + (variant ? ` (${variant.label})` : "") + (mods.length ? ` + ${mods.map((x) => x.label).join(", ")}` : "");
+const lineLabel = (m, variant, mods) => {
+  const sauces = mods.filter((x) => x.kind === "sauce");
+  const tops = mods.filter((x) => x.kind !== "sauce");
+  // Sauce sits with the size (it swaps the base sauce); toppings follow the "+".
+  return m.name
+    + (variant ? ` (${variant.label}${sauces.length ? ", " + sauces.map((s) => s.label).join(", ") : ""})` : "")
+    + (tops.length ? ` + ${tops.map((t) => t.label).join(", ")}` : "");
+};
 const lineKey = (m, variant, mods) => [m.id, variant ? variant.id : "", mods.map((x) => x.id).slice().sort().join(",")].join("|");
 
 // ---------- cart (a list of configured lines) ----------
@@ -848,12 +859,20 @@ function sheetPickSize(id) {
 }
 function sheetToggleMod(id) {
   const s = state.sheet; if (!s) return;
+  const m = state.menu.find((x) => x.id === s.itemId); if (!m) return;
+  const mod = itemMods(m).find((x) => x.id === id); if (!mod) return;
+  const kindOf = (mid) => (itemMods(m).find((x) => x.id === mid) || {}).kind;
   if (s.modIds.includes(id)) {
     s.modIds = s.modIds.filter((x) => x !== id);
+  } else if (mod.kind === "sauce") {
+    // One sauce at a time (default red = none). Ticking white replaces any other
+    // sauce; sauces never count toward the topping cap.
+    s.modIds = [...s.modIds.filter((mid) => kindOf(mid) !== "sauce"), id];
   } else {
-    // Daily Dough caps a pizza at three toppings. The server enforces the same
-    // limit; this just stops the fourth tick and says why.
-    if (s.modIds.length >= MAX_TOPPINGS) { toast(`Up to ${MAX_TOPPINGS} toppings`, "error"); return; }
+    // Daily Dough caps a pizza at three toppings (sauces don't count). The
+    // server enforces the same limit; this just stops the fourth tick.
+    const toppings = s.modIds.filter((mid) => kindOf(mid) !== "sauce");
+    if (toppings.length >= MAX_TOPPINGS) { toast(`Up to ${MAX_TOPPINGS} toppings`, "error"); return; }
     s.modIds = [...s.modIds, id];
   }
   renderSheet();
@@ -898,12 +917,24 @@ function renderSheet() {
         <div class="opt ${variant && variant.id === v.id ? "sel" : ""}" onclick="sheetPickSize('${v.id}')">
           <span class="lab">${box(variant && variant.id === v.id, true)} ${esc(v.label)}</span>
           <span class="pr">${money(v.price_cents)}</span></div>`).join("") : ""}
-      ${mods.length && showMods ? `<div class="grp">Extra toppings <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· up to ${MAX_TOPPINGS} (${s.modIds.length}/${MAX_TOPPINGS})</span></div>` + mods.map((x) => {
-        const on = s.modIds.includes(x.id);
-        const full = !on && s.modIds.length >= MAX_TOPPINGS;
-        return `<div class="opt ${on ? "sel" : ""}${full ? " optdim" : ""}" onclick="sheetToggleMod('${x.id}')">
-          <span class="lab">${box(on, false)} ${esc(x.label)}</span>
-          <span class="pr">+${money(x.price_cents)}</span></div>`; }).join("") : ""}
+      ${(() => {
+        if (!showMods) return "";
+        const sauces = itemSauces(m), tops = itemToppings(m);
+        const nTop = s.modIds.filter((mid) => tops.some((t) => t.id === mid)).length;
+        // Sauce swap (default red). White is free; picking it swaps, not adds.
+        const sauceGrp = sauces.length ? `<div class="grp">Sauce <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· red by default</span></div>` + sauces.map((x) => {
+          const on = s.modIds.includes(x.id);
+          return `<div class="opt ${on ? "sel" : ""}" onclick="sheetToggleMod('${x.id}')">
+            <span class="lab">${box(on, false)} ${esc(x.label)}</span>
+            <span class="pr">${x.price_cents ? "+" + money(x.price_cents) : "Free"}</span></div>`; }).join("") : "";
+        const topGrp = tops.length ? `<div class="grp">Extra toppings <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· up to ${MAX_TOPPINGS} (${nTop}/${MAX_TOPPINGS})</span></div>` + tops.map((x) => {
+          const on = s.modIds.includes(x.id);
+          const full = !on && nTop >= MAX_TOPPINGS;
+          return `<div class="opt ${on ? "sel" : ""}${full ? " optdim" : ""}" onclick="sheetToggleMod('${x.id}')">
+            <span class="lab">${box(on, false)} ${esc(x.label)}</span>
+            <span class="pr">+${money(x.price_cents)}</span></div>`; }).join("") : "";
+        return sauceGrp + topGrp;
+      })()}
       ${drinks.length ? `<div class="grp">Add a drink?</div>` + drinks.map((d) => `
         <div class="opt ${s.drinkId === d.id ? "sel" : ""}" onclick="sheetPickDrink('${d.id}')">
           <span class="lab">${box(s.drinkId === d.id, false)} ${esc(d.name)}</span>

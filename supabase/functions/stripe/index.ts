@@ -446,7 +446,7 @@ Deno.serve(async (req) => {
       const { data: variants } = await admin.from("menu_item_variants")
         .select("id,menu_item_id,label,price_cents,allows_modifiers").in("menu_item_id", ids);
       const { data: modifiers } = await admin.from("menu_item_modifiers")
-        .select("id,menu_item_id,label,price_cents").in("menu_item_id", ids);
+        .select("id,menu_item_id,label,price_cents,kind").in("menu_item_id", ids);
       const variantsByItem = new Map<string, any[]>();
       for (const v of variants ?? []) {
         const arr = variantsByItem.get(v.menu_item_id) ?? [];
@@ -489,15 +489,20 @@ Deno.serve(async (req) => {
           chosenMods.push(mod);
           unit += mod.price_cents;
         }
+        // A sauce (e.g. the free white-sauce swap) is not a topping and does not
+        // count toward the cap. Everything else does.
+        const sauces = chosenMods.filter((x) => x.kind === "sauce");
+        const toppings = chosenMods.filter((x) => x.kind !== "sauce");
         // Daily Dough caps a pizza at three toppings. Enforce it here too, not
         // just in the app, so a crafted request can't stack fifteen.
-        if (chosenMods.length > 3) return json({ error: "Up to 3 toppings per pizza." }, 400);
+        if (toppings.length > 3) return json({ error: "Up to 3 toppings per pizza." }, 400);
 
         // The kitchen ticket and the receipt both read this label, so it has to
-        // describe the whole choice even if the menu changes afterwards.
+        // describe the whole choice even if the menu changes afterwards. Sauce
+        // sits with the size (it modifies the base); toppings follow the "+".
         const label = m.name
-          + (variant ? " (" + variant.label + ")" : "")
-          + (chosenMods.length ? " + " + chosenMods.map((x) => x.label).join(", ") : "");
+          + (variant ? " (" + variant.label + (sauces.length ? ", " + sauces.map((x) => x.label).join(", ") : "") + ")" : "")
+          + (toppings.length ? " + " + toppings.map((x) => x.label).join(", ") : "");
 
         total += unit * qty;
         lines.push({ name: label, unit, qty, item_id: m.id });
