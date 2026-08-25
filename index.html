@@ -215,6 +215,7 @@
     border:1px solid var(--blue-line); border-radius:12px; padding:12px 14px; margin-bottom:8px;
     cursor:pointer; touch-action:manipulation; background:#fff; }
   .opt.sel { border-color:var(--blue); background:var(--blue-light); }
+  .opt.optdim { opacity:.45; }
   .opt .lab { font-weight:600; }
   .opt .pr { font-variant-numeric:tabular-nums; color:var(--muted); font-weight:700; }
   .opt .box { width:22px; height:22px; border-radius:6px; border:2px solid var(--blue-line); flex:none; display:grid; place-items:center; font-size:14px; color:#fff; }
@@ -770,6 +771,7 @@ async function openTruck(id) {
 }
 
 // ---------- menu-item option helpers ----------
+const MAX_TOPPINGS = 3; // Daily Dough caps a pizza at three toppings.
 const itemVariants = (m) => (m.menu_item_variants || []).slice().sort((a, b) => a.sort - b.sort);
 const itemMods = (m) => (m.menu_item_modifiers || []).slice().sort((a, b) => a.sort - b.sort);
 const hasOptions = (m) => itemVariants(m).length > 0 || itemMods(m).length > 0;
@@ -825,7 +827,11 @@ function openSheet(itemId) {
   if (!isOrderable(state.truck)) return;
   const m = state.menu.find((x) => x.id === itemId); if (!m) return;
   const vs = itemVariants(m);
-  state.sheet = { itemId, variantId: vs.length ? vs[0].id : null, modIds: [], drinkId: null, qty: 1 };
+  // No size is preselected when an item is sold by size: the toppings only
+  // appear once the student actively picks Whole, so the pizza opens on the
+  // size choice rather than showing toppings for a size nobody chose yet. A
+  // flat item (no sizes) needs no choice, so it stays null and just orders.
+  state.sheet = { itemId, variantId: null, modIds: [], drinkId: null, qty: 1 };
   renderSheet();
 }
 function closeSheet() { state.sheet = null; const el = $("sheet"); if (el) el.innerHTML = ""; }
@@ -842,7 +848,14 @@ function sheetPickSize(id) {
 }
 function sheetToggleMod(id) {
   const s = state.sheet; if (!s) return;
-  s.modIds = s.modIds.includes(id) ? s.modIds.filter((x) => x !== id) : [...s.modIds, id];
+  if (s.modIds.includes(id)) {
+    s.modIds = s.modIds.filter((x) => x !== id);
+  } else {
+    // Daily Dough caps a pizza at three toppings. The server enforces the same
+    // limit; this just stops the fourth tick and says why.
+    if (s.modIds.length >= MAX_TOPPINGS) { toast(`Up to ${MAX_TOPPINGS} toppings`, "error"); return; }
+    s.modIds = [...s.modIds, id];
+  }
   renderSheet();
 }
 function sheetPickDrink(id) { const s = state.sheet; if (s) { s.drinkId = s.drinkId === id ? null : id; renderSheet(); } }
@@ -868,9 +881,11 @@ function renderSheet() {
   const vs = itemVariants(m), mods = itemMods(m);
   const drinks = state.menu.filter((x) => x.category === "drink");
   const variant = vs.find((v) => v.id === s.variantId) || null;
-  // Toppings only apply to a size that allows them (whole, not slice).
-  const canMod = !variant || variant.allows_modifiers !== false;
-  const chosenMods = canMod ? mods.filter((x) => s.modIds.includes(x.id)) : [];
+  const needsSize = vs.length > 0 && !variant;
+  // Toppings show only once a size that allows them is actually chosen — so a
+  // whole pie reveals them and a slice (or an unpicked size) shows none.
+  const showMods = !!variant && variant.allows_modifiers !== false;
+  const chosenMods = showMods ? mods.filter((x) => s.modIds.includes(x.id)) : [];
   const pizzaUnit = lineUnit(m, variant, chosenMods);
   const drink = s.drinkId ? drinks.find((d) => d.id === s.drinkId) : null;
   const composed = pizzaUnit * s.qty + (drink ? drink.price_cents : 0);
@@ -883,10 +898,12 @@ function renderSheet() {
         <div class="opt ${variant && variant.id === v.id ? "sel" : ""}" onclick="sheetPickSize('${v.id}')">
           <span class="lab">${box(variant && variant.id === v.id, true)} ${esc(v.label)}</span>
           <span class="pr">${money(v.price_cents)}</span></div>`).join("") : ""}
-      ${mods.length && canMod ? `<div class="grp">Extra toppings</div>` + mods.map((x) => `
-        <div class="opt ${s.modIds.includes(x.id) ? "sel" : ""}" onclick="sheetToggleMod('${x.id}')">
-          <span class="lab">${box(s.modIds.includes(x.id), false)} ${esc(x.label)}</span>
-          <span class="pr">+${money(x.price_cents)}</span></div>`).join("") : ""}
+      ${mods.length && showMods ? `<div class="grp">Extra toppings <span class="muted" style="font-weight:600;text-transform:none;letter-spacing:0">· up to ${MAX_TOPPINGS} (${s.modIds.length}/${MAX_TOPPINGS})</span></div>` + mods.map((x) => {
+        const on = s.modIds.includes(x.id);
+        const full = !on && s.modIds.length >= MAX_TOPPINGS;
+        return `<div class="opt ${on ? "sel" : ""}${full ? " optdim" : ""}" onclick="sheetToggleMod('${x.id}')">
+          <span class="lab">${box(on, false)} ${esc(x.label)}</span>
+          <span class="pr">+${money(x.price_cents)}</span></div>`; }).join("") : ""}
       ${drinks.length ? `<div class="grp">Add a drink?</div>` + drinks.map((d) => `
         <div class="opt ${s.drinkId === d.id ? "sel" : ""}" onclick="sheetPickDrink('${d.id}')">
           <span class="lab">${box(s.drinkId === d.id, false)} ${esc(d.name)}</span>
@@ -897,7 +914,7 @@ function renderSheet() {
           <b aria-live="polite">${s.qty}</b>
           <button aria-label="One more" onclick="sheetQty(1)">+</button>
         </div>
-        <button class="primary" onclick="addSheetToCart()">Add ${s.qty} · ${money(composed)}</button>
+        <button class="primary" ${needsSize ? "disabled" : ""} onclick="addSheetToCart()">${needsSize ? "Choose a size" : `Add ${s.qty} · ${money(composed)}`}</button>
       </div>
     </div></div>`;
 }
