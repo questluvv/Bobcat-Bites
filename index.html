@@ -216,6 +216,9 @@
     cursor:pointer; touch-action:manipulation; background:#fff; }
   .opt.sel { border-color:var(--blue); background:var(--blue-light); }
   .opt.optdim { opacity:.45; }
+  .disclaimer { font-size:12.5px; line-height:1.4; color:var(--muted); background:var(--blue-light);
+    border:1px solid var(--blue-line); border-radius:10px; padding:9px 11px; margin:2px 0 6px; }
+  [data-vendor-theme="daily-dough"] .disclaimer { background:rgba(255,228,225,.08); border-color:var(--dd-line); color:var(--dd-cream-dim); }
   .opt .lab { font-weight:600; }
   .opt .pr { font-variant-numeric:tabular-nums; color:var(--muted); font-weight:700; }
   .opt .box { width:22px; height:22px; border-radius:6px; border:2px solid var(--blue-line); flex:none; display:grid; place-items:center; font-size:14px; color:#fff; }
@@ -764,7 +767,7 @@ async function openTruck(id) {
   // One query pulls the item plus its sizes (variants) and toppings (modifiers).
   // A flat item just comes back with empty child arrays and behaves as before.
   const { data, error } = await sb.from("menu_items")
-    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort,allows_modifiers),menu_item_modifiers(id,label,price_cents,sort,kind)")
+    .select("id,name,description,price_cents,default_prep_minutes,photo_url,category,menu_item_variants(id,label,price_cents,prep_minutes,sort,allows_modifiers,note),menu_item_modifiers(id,label,price_cents,sort,kind)")
     .eq("vendor_id", id).eq("is_available", true).order("name", { ascending: true });
   if (error) { console.error("menu load failed:", error); toast("Couldn't load the menu — try again in a moment.", "error"); }
   state.menu = data || []; render();
@@ -917,6 +920,7 @@ function renderSheet() {
         <div class="opt ${variant && variant.id === v.id ? "sel" : ""}" onclick="sheetPickSize('${v.id}')">
           <span class="lab">${box(variant && variant.id === v.id, true)} ${esc(v.label)}</span>
           <span class="pr">${money(v.price_cents)}</span></div>`).join("") : ""}
+      ${variant && variant.note ? `<div class="disclaimer">ℹ️ ${esc(variant.note)}</div>` : ""}
       ${(() => {
         if (!showMods) return "";
         const sauces = itemSauces(m), tops = itemToppings(m);
