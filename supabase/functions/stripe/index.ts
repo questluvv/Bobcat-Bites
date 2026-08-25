@@ -489,6 +489,9 @@ Deno.serve(async (req) => {
           chosenMods.push(mod);
           unit += mod.price_cents;
         }
+        // Daily Dough caps a pizza at three toppings. Enforce it here too, not
+        // just in the app, so a crafted request can't stack fifteen.
+        if (chosenMods.length > 3) return json({ error: "Up to 3 toppings per pizza." }, 400);
 
         // The kitchen ticket and the receipt both read this label, so it has to
         // describe the whole choice even if the menu changes afterwards.
